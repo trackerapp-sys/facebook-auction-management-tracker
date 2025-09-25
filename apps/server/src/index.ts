@@ -231,10 +231,15 @@ app.get('/facebook/groups', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/auctions', async (req: Request, res: Response) => {
-  const auth = req.session.facebookAuth;
-  if (!auth) {
-    res.status(401).json({ error: 'Not authenticated with Facebook' });
+app.post('/facebook/data-deletion', (_req, res) => {
+  const confirmationCode = `del-${Date.now()}`;
+  res.json({
+    url: 'https://facebook-auction-app.onrender.com/data-deletion.html',
+    confirmation_code: confirmationCode,
+    status: 'pending'
+  });
+});
+
     return;
   }
 
@@ -260,7 +265,7 @@ app.post('/auctions', async (req: Request, res: Response) => {
   try {
     if (type === 'post') {
       const postUrl = new URL(`https://graph.facebook.com/v19.0/${groupId}/feed`);
-      const message = `${itemName}\nReserve: ${reservePrice ?? '—'}\nStarting: ${startingPrice ?? '—'}\n\n${safeDescription}`;
+      const message = `${itemName}\nReserve: ${reservePrice ?? 'â€”'}\nStarting: ${startingPrice ?? 'â€”'}\n\n${safeDescription}`;
 
       const body = new URLSearchParams();
       body.set('message', message);
@@ -303,3 +308,4 @@ app.listen(port, () => {
   console.log(`Client origin: ${CLIENT_ORIGIN}`);
   console.log(`Facebook redirect URI: ${FACEBOOK_REDIRECT_URI}`);
 });
+
