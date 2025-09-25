@@ -1,0 +1,14 @@
+{
+  "name": "facebook-auction-management-tracker",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "apps/server"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspace apps/web",
+    "preview": "npm run preview --workspace apps/web",
+    "server": "npm run dev --workspace apps/server"
+  }
+}
