@@ -45,8 +45,13 @@ export interface AuctionDraft {
     reservePrice: number;
     startingPrice: number;
     bidIncrement: number;
-    autoCloseMinutes: number;
+    autoCloseMinutes?: number;
     intervalBetweenItems?: number;
+    caratWeight?: number;
+    gramWeight?: number;
+    startDateTime?: string;
+    endDateTime?: string;
+    durationMinutes?: number;
     status: 'draft' | 'scheduled' | 'live' | 'closed';
 }
 export interface AppState {

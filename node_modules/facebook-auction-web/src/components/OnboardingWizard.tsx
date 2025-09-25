@@ -1,29 +1,40 @@
 ﻿import { FormEvent, useMemo, useState } from 'react';
-import { useAppState, UserProfile, InventoryItem, PaymentMethodConfig } from '../state';
+import { useAppState, UserProfile, PaymentMethodConfig } from '../state';
 
 const timeZones = [
+  'Australia/Sydney',
+  'Australia/Melbourne',
+  'Australia/Brisbane',
+  'Australia/Perth',
+  'Australia/Adelaide',
+  'Australia/Darwin',
+  'Australia/Hobart',
+  'Australia/Canberra',
+  'Australia/Broken_Hill',
+  'Australia/Lindeman',
+  'Australia/Eucla',
+  'Australia/Lord_Howe',
   'America/New_York',
   'America/Chicago',
   'America/Denver',
   'America/Los_Angeles',
   'Europe/London',
-  'Europe/Paris',
-  'Australia/Sydney'
+  'Europe/Paris'
 ];
 
-const currencies = ['USD', 'CAD', 'GBP', 'EUR', 'AUD'];
+const currencies = ['AUD', 'NZD', 'CAD', 'GBP', 'EUR'];
 
-const stepTitles = ['Profile', 'Auction Preferences', 'Inventory', 'Payments'];
+const stepTitles = ['Profile', 'Auction Preferences', 'Payments'];
 
-type WizardStep = 0 | 1 | 2 | 3;
+type WizardStep = 0 | 1 | 2;
 
-const stepBadges: Array<'info' | 'success' | 'warning'> = ['info', 'success', 'warning', 'success'];
+const stepBadges: Array<'info' | 'success' | 'warning'> = ['info', 'success', 'success'];
 
 const defaultProfile: UserProfile = {
   displayName: '',
   businessType: 'individual',
-  timeZone: timeZones[0],
-  currency: currencies[0],
+  timeZone: 'Australia/Sydney',
+  currency: 'AUD',
   bidMonitoringInterval: 5,
   inventory: [],
   paymentMethods: []
@@ -33,13 +44,6 @@ const OnboardingWizard = () => {
   const { dispatch } = useAppState();
   const [step, setStep] = useState<WizardStep>(0);
   const [profileDraft, setProfileDraft] = useState<UserProfile>(defaultProfile);
-  const [newInventoryItem, setNewInventoryItem] = useState<Omit<InventoryItem, 'id'>>({
-    name: '',
-    description: '',
-    reservePrice: 0,
-    startingPrice: 0,
-    quantity: 1
-  });
   const [newPaymentMethod, setNewPaymentMethod] = useState<Omit<PaymentMethodConfig, 'id'>>({
     label: '',
     details: '',
@@ -53,28 +57,7 @@ const OnboardingWizard = () => {
     if (!profileDraft.displayName.trim()) {
       return;
     }
-    setStep((prev) => (prev < 3 ? ((prev + 1) as WizardStep) : prev));
-  };
-
-  const handleAddInventoryItem = () => {
-    if (!newInventoryItem.name.trim()) {
-      return;
-    }
-
-    const item: InventoryItem = {
-      ...newInventoryItem,
-      id: `inv-${Date.now()}`
-    };
-
-    setProfileDraft((prev) => ({ ...prev, inventory: [...prev.inventory, item] }));
-    setNewInventoryItem({ name: '', description: '', reservePrice: 0, startingPrice: 0, quantity: 1 });
-  };
-
-  const handleRemoveInventoryItem = (id: string) => {
-    setProfileDraft((prev) => ({
-      ...prev,
-      inventory: prev.inventory.filter((item) => item.id !== id)
-    }));
+    setStep(1);
   };
 
   const handleAddPaymentMethod = () => {
@@ -219,14 +202,14 @@ const OnboardingWizard = () => {
               <div className="timeline-item">
                 <strong>Live auction cadence</strong>
                 <p className="helper-text">
-                  Configure item intervals later in the live auction workspace. We recommend 3-5 minutes per item.
+                  Set pacing per auction in the Live workspace—ideal cadence is 3-5 minutes per item.
                 </p>
                 <span className="badge info">Adjustable per auction</span>
               </div>
               <div className="timeline-item">
                 <strong>Notifications</strong>
                 <p className="helper-text">
-                  Set up bidder reminders, payment nudges, and post-auction follow-ups in settings.
+                  Bidder reminders, payment nudges, and post-auction follow-ups live inside Settings.
                 </p>
                 <span className="badge warning">Coming soon</span>
               </div>
@@ -242,127 +225,6 @@ const OnboardingWizard = () => {
           </div>
         );
       case 2:
-        return (
-          <div className="form-grid">
-            <div className="form-grid two-columns">
-              <div>
-                <label className="field-label" htmlFor="itemName">
-                  Item name
-                </label>
-                <input
-                  id="itemName"
-                  value={newInventoryItem.name}
-                  onChange={(event) =>
-                    setNewInventoryItem((prev) => ({ ...prev, name: event.target.value }))
-                  }
-                  placeholder="e.g. Vintage Coach Bag"
-                />
-              </div>
-              <div>
-                <label className="field-label" htmlFor="itemQty">
-                  Quantity
-                </label>
-                <input
-                  id="itemQty"
-                  type="number"
-                  min={1}
-                  value={newInventoryItem.quantity}
-                  onChange={(event) =>
-                    setNewInventoryItem((prev) => ({ ...prev, quantity: Number(event.target.value) }))
-                  }
-                />
-              </div>
-            </div>
-            <div>
-              <label className="field-label" htmlFor="itemDescription">
-                Description
-              </label>
-              <textarea
-                id="itemDescription"
-                rows={3}
-                value={newInventoryItem.description}
-                onChange={(event) =>
-                  setNewInventoryItem((prev) => ({ ...prev, description: event.target.value }))
-                }
-                placeholder="Highlight condition, sizing, and any bundle details."
-              />
-            </div>
-            <div className="form-grid two-columns">
-              <div>
-                <label className="field-label" htmlFor="reservePrice">
-                  Reserve price
-                </label>
-                <input
-                  id="reservePrice"
-                  type="number"
-                  min={0}
-                  value={newInventoryItem.reservePrice}
-                  onChange={(event) =>
-                    setNewInventoryItem((prev) => ({ ...prev, reservePrice: Number(event.target.value) }))
-                  }
-                />
-              </div>
-              <div>
-                <label className="field-label" htmlFor="startingPrice">
-                  Starting price
-                </label>
-                <input
-                  id="startingPrice"
-                  type="number"
-                  min={0}
-                  value={newInventoryItem.startingPrice}
-                  onChange={(event) =>
-                    setNewInventoryItem((prev) => ({ ...prev, startingPrice: Number(event.target.value) }))
-                  }
-                />
-                <p className="helper-text">
-                  Reserve is the minimum you will accept. Starting price can be lower to drive engagement.
-                </p>
-              </div>
-            </div>
-            <div className="inline-actions">
-              <button type="button" className="ghost-button" onClick={() => setStep(1)}>
-                Back
-              </button>
-              <button type="button" className="primary-action" onClick={handleAddInventoryItem}>
-                Add to inventory
-              </button>
-            </div>
-            <div className="list-box">
-              <p className="field-label">Current inventory</p>
-              {profileDraft.inventory.length === 0 ? (
-                <div className="empty-state">
-                  <h3>No items yet</h3>
-                  <p>Add at least one item so you can launch your first auction with confidence.</p>
-                </div>
-              ) : (
-                profileDraft.inventory.map((item) => (
-                  <div key={item.id} className="list-box-item">
-                    <div>
-                      <strong>{item.name}</strong>
-                      <p className="helper-text">
-                        Reserve {profileDraft.currency} {item.reservePrice.toFixed(2)} · Starting{' '}
-                        {profileDraft.currency} {item.startingPrice.toFixed(2)} · Qty {item.quantity}
-                      </p>
-                    </div>
-                    <button type="button" className="subtle-button" onClick={() => handleRemoveInventoryItem(item.id)}>
-                      Remove
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="action-bar">
-              <button className="secondary-action" type="button" onClick={() => setStep(1)}>
-                Back
-              </button>
-              <button className="primary-action" type="button" onClick={() => setStep(3)}>
-                Continue
-              </button>
-            </div>
-          </div>
-        );
-      case 3:
         return (
           <div className="form-grid">
             <div className="form-grid two-columns">
@@ -411,7 +273,7 @@ const OnboardingWizard = () => {
               />
             </div>
             <div className="inline-actions">
-              <button type="button" className="ghost-button" onClick={() => setStep(2)}>
+              <button type="button" className="ghost-button" onClick={() => setStep(1)}>
                 Back
               </button>
               <button type="button" className="primary-action" onClick={handleAddPaymentMethod}>
@@ -444,7 +306,7 @@ const OnboardingWizard = () => {
               Finish setup to unlock the auction control center and Facebook integrations.
             </div>
             <div className="action-bar">
-              <button className="secondary-action" type="button" onClick={() => setStep(2)}>
+              <button className="secondary-action" type="button" onClick={() => setStep(1)}>
                 Back
               </button>
               <button className="primary-action" type="button" onClick={handleComplete}>
@@ -477,15 +339,14 @@ const OnboardingWizard = () => {
                 <small>
                   {index === 0 && 'Set your brand tone and locale setup.'}
                   {index === 1 && 'Tune how often we monitor and remind bidders.'}
-                  {index === 2 && 'Add hero inventory ready for your first drop.'}
-                  {index === 3 && 'Collect payments seamlessly post-auction.'}
+                  {index === 2 && 'Collect payments seamlessly post-auction.'}
                 </small>
               </div>
             </li>
           ))}
         </ol>
         <div className="onboarding-footer">
-          <p>Need help importing inventory? Drop us a line and we will assist with CSV upload.</p>
+          <p>Need help importing inventory later? Drop us a line and we will assist with CSV upload.</p>
           <a className="inline-link" href="#support" onClick={(event) => event.preventDefault()}>
             Contact support
           </a>

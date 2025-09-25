@@ -1,8 +1,11 @@
-﻿import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AppStateProvider, useAppState } from './state';
+import type { FacebookAuthState, FacebookGroup } from './state';
 import OnboardingWizard from './components/OnboardingWizard';
 import AuctionWorkspace from './components/AuctionWorkspace';
 import Sidebar from './components/Sidebar';
+import LoginScreen from './components/LoginScreen';
+import { checkFacebookSession, fetchUserGroups } from './services';
 import './App.css';
 
 function AppShell() {
@@ -13,6 +16,56 @@ function AppShell() {
   const [activeSection, setActiveSection] = useState<'overview' | 'auctions' | 'inventory' | 'settings' | 'analytics'>(
     'overview'
   );
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [startupError, setStartupError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const bootstrapSession = async () => {
+      try {
+        const session = await checkFacebookSession();
+        if (cancelled) {
+          return;
+        }
+
+        dispatch({ type: 'set-facebook-auth', payload: session });
+
+        if (session.isAuthenticated) {
+          try {
+            const fetchedGroups = await fetchUserGroups();
+            if (!cancelled) {
+              dispatch({ type: 'set-facebook-groups', payload: fetchedGroups });
+            }
+          } catch (groupError) {
+            if (!cancelled) {
+              console.warn('Unable to load Facebook groups during bootstrap', groupError);
+              setStartupError('Connected to Facebook, but failed to load your groups. Try reconnecting.');
+            }
+          }
+        } else {
+          dispatch({ type: 'set-facebook-groups', payload: [] });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('Failed to verify Facebook session', error);
+          dispatch({ type: 'set-facebook-auth', payload: { isAuthenticated: false } });
+          dispatch({ type: 'set-facebook-groups', payload: [] });
+          setStartupError('Unable to verify Facebook session. Please login again.');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsBootstrapping(false);
+        }
+      }
+    };
+
+    void bootstrapSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch]);
 
   const sectionTitle = useMemo(() => {
     switch (activeSection) {
@@ -28,6 +81,27 @@ function AppShell() {
         return 'Dashboard Overview';
     }
   }, [activeSection]);
+
+  const handleAuthenticated = (authState: FacebookAuthState, fetchedGroups: FacebookGroup[]) => {
+    dispatch({ type: 'set-facebook-auth', payload: authState });
+    dispatch({ type: 'set-facebook-groups', payload: fetchedGroups });
+    setStartupError(null);
+  };
+
+  if (isBootstrapping) {
+    return (
+      <div className="auth-gate booting">
+        <div className="auth-panel loading">
+          <div className="auth-logo">FM</div>
+          <p>Preparing your workspace...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!facebookAuth.isAuthenticated) {
+    return <LoginScreen error={startupError} onAuthenticated={handleAuthenticated} />;
+  }
 
   if (!profile) {
     return <OnboardingWizard />;

@@ -1,4 +1,4 @@
-﻿import 'dotenv/config';
+import 'dotenv/config';
 import cors from 'cors';
 import express from 'express';
 import session from 'express-session';
@@ -41,7 +41,7 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const FACEBOOK_REDIRECT_URI =
   process.env.FACEBOOK_REDIRECT_URI || `${SERVER_BASE_URL}/auth/facebook/callback`;
 const FACEBOOK_OAUTH_SCOPES = (process.env.FACEBOOK_OAUTH_SCOPES ||
-  'public_profile'
+  'public_profile,groups_access_member_info,pages_manage_posts,pages_read_engagement'
 )
   .split(',')
   .map((scope) => scope.trim())
@@ -231,15 +231,6 @@ app.get('/facebook/groups', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/facebook/data-deletion', (_req, res) => {
-  const confirmationCode = `del-${Date.now()}`;
-  res.json({
-    url: 'https://facebook-auction-app.onrender.com/data-deletion.html',
-    confirmation_code: confirmationCode,
-    status: 'pending'
-  });
-});
-
 app.post('/auctions', async (req: Request, res: Response) => {
   const auth = req.session.facebookAuth;
   if (!auth) {
@@ -247,7 +238,21 @@ app.post('/auctions', async (req: Request, res: Response) => {
     return;
   }
 
-  const { type, itemName, description, groupId, reservePrice, startingPrice } = req.body as Record<string, unknown>;
+  const {
+    type,
+    itemName,
+    description,
+    groupId,
+    reservePrice,
+    startingPrice,
+    startDateTime,
+    endDateTime,
+    durationMinutes,
+    caratWeight,
+    gramWeight,
+    autoCloseMinutes,
+    intervalBetweenItems
+  } = req.body as Record<string, unknown>;
 
   if (!groupId || typeof groupId !== 'string') {
     res.status(400).json({ error: 'groupId is required' });
@@ -264,12 +269,50 @@ app.post('/auctions', async (req: Request, res: Response) => {
     return;
   }
 
+  if (type === 'post') {
+    if (!startDateTime || typeof startDateTime !== 'string') {
+      res.status(400).json({ error: 'startDateTime is required for post auctions' });
+      return;
+    }
+
+    if (!endDateTime || typeof endDateTime !== 'string') {
+      res.status(400).json({ error: 'endDateTime is required for post auctions' });
+      return;
+    }
+  }
+
   const safeDescription = typeof description === 'string' ? description : '';
+
+  const formatCurrencyField = (input: unknown) => {
+    const numeric =
+      typeof input === 'number'
+        ? input
+        : typeof input === 'string'
+        ? Number(input)
+        : Number.NaN;
+    if (!Number.isNaN(numeric)) {
+      return numeric.toFixed(2);
+    }
+    return '—';
+  };
+
+  const parseNumber = (input: unknown): number | undefined => {
+    if (typeof input === 'number') {
+      return Number.isNaN(input) ? undefined : input;
+    }
+
+    if (typeof input === 'string' && input.trim() !== '') {
+      const parsed = Number(input);
+      return Number.isNaN(parsed) ? undefined : parsed;
+    }
+
+    return undefined;
+  };
 
   try {
     if (type === 'post') {
       const postUrl = new URL(`https://graph.facebook.com/v19.0/${groupId}/feed`);
-      const message = `${itemName}\nReserve: ${reservePrice ?? '-'}\nStarting: ${startingPrice ?? '-'}\n\n${safeDescription}`;
+      const message = `${itemName}\nReserve: ${formatCurrencyField(reservePrice)}\nStarting: ${formatCurrencyField(startingPrice)}\n\n${safeDescription}`;
 
       const body = new URLSearchParams();
       body.set('message', message);
@@ -290,23 +333,33 @@ app.post('/auctions', async (req: Request, res: Response) => {
         auctionId: postPayload.id,
         status: 'scheduled',
         platformReference: postPayload.id,
-        message: 'Post published to Facebook group feed.'
+        message: 'Post published to Facebook group feed.',
+        startDateTime,
+        endDateTime,
+        durationMinutes: parseNumber(durationMinutes),
+        caratWeight: parseNumber(caratWeight),
+        gramWeight: parseNumber(gramWeight)
       });
       return;
     }
 
-    // Live auction placeholder
+    const liveAutoClose = parseNumber(autoCloseMinutes) ?? 60;
+    const liveInterval = parseNumber(intervalBetweenItems) ?? 4;
+
     res.json({
       auctionId: `live-${Date.now()}`,
       status: 'scheduled',
-      message: 'Live auction creation via Graph API not yet implemented.'
+      message: 'Live auction creation via Graph API not yet implemented.',
+      autoCloseMinutes: liveAutoClose,
+      intervalBetweenItems: liveInterval,
+      caratWeight: parseNumber(caratWeight),
+      gramWeight: parseNumber(gramWeight)
     });
   } catch (err) {
     console.error('Error scheduling auction', err);
     res.status(502).json({ error: 'Unable to schedule auction with Facebook' });
   }
 });
-
 app.listen(port, () => {
   console.log(`API listening on port ${port}`);
   console.log(`Client origin: ${CLIENT_ORIGIN}`);

@@ -165,7 +165,7 @@ app.post('/auctions', async (req, res) => {
         res.status(401).json({ error: 'Not authenticated with Facebook' });
         return;
     }
-    const { type, itemName, description, groupId, reservePrice, startingPrice } = req.body;
+    const { type, itemName, description, groupId, reservePrice, startingPrice, startDateTime, endDateTime, durationMinutes, caratWeight, gramWeight, autoCloseMinutes, intervalBetweenItems } = req.body;
     if (!groupId || typeof groupId !== 'string') {
         res.status(400).json({ error: 'groupId is required' });
         return;
@@ -178,11 +178,42 @@ app.post('/auctions', async (req, res) => {
         res.status(400).json({ error: 'type must be "post" or "live"' });
         return;
     }
+    if (type === 'post') {
+        if (!startDateTime || typeof startDateTime !== 'string') {
+            res.status(400).json({ error: 'startDateTime is required for post auctions' });
+            return;
+        }
+        if (!endDateTime || typeof endDateTime !== 'string') {
+            res.status(400).json({ error: 'endDateTime is required for post auctions' });
+            return;
+        }
+    }
     const safeDescription = typeof description === 'string' ? description : '';
+    const formatCurrencyField = (input) => {
+        const numeric = typeof input === 'number'
+            ? input
+            : typeof input === 'string'
+                ? Number(input)
+                : Number.NaN;
+        if (!Number.isNaN(numeric)) {
+            return numeric.toFixed(2);
+        }
+        return '—';
+    };
+    const parseNumber = (input) => {
+        if (typeof input === 'number') {
+            return Number.isNaN(input) ? undefined : input;
+        }
+        if (typeof input === 'string' && input.trim() !== '') {
+            const parsed = Number(input);
+            return Number.isNaN(parsed) ? undefined : parsed;
+        }
+        return undefined;
+    };
     try {
         if (type === 'post') {
             const postUrl = new URL(`https://graph.facebook.com/v19.0/${groupId}/feed`);
-            const message = `${itemName}\nReserve: ${reservePrice ?? '—'}\nStarting: ${startingPrice ?? '—'}\n\n${safeDescription}`;
+            const message = `${itemName}\nReserve: ${formatCurrencyField(reservePrice)}\nStarting: ${formatCurrencyField(startingPrice)}\n\n${safeDescription}`;
             const body = new URLSearchParams();
             body.set('message', message);
             body.set('access_token', auth.accessToken);
@@ -199,15 +230,25 @@ app.post('/auctions', async (req, res) => {
                 auctionId: postPayload.id,
                 status: 'scheduled',
                 platformReference: postPayload.id,
-                message: 'Post published to Facebook group feed.'
+                message: 'Post published to Facebook group feed.',
+                startDateTime,
+                endDateTime,
+                durationMinutes: parseNumber(durationMinutes),
+                caratWeight: parseNumber(caratWeight),
+                gramWeight: parseNumber(gramWeight)
             });
             return;
         }
-        // Live auction placeholder
+        const liveAutoClose = parseNumber(autoCloseMinutes) ?? 60;
+        const liveInterval = parseNumber(intervalBetweenItems) ?? 4;
         res.json({
             auctionId: `live-${Date.now()}`,
             status: 'scheduled',
-            message: 'Live auction creation via Graph API not yet implemented.'
+            message: 'Live auction creation via Graph API not yet implemented.',
+            autoCloseMinutes: liveAutoClose,
+            intervalBetweenItems: liveInterval,
+            caratWeight: parseNumber(caratWeight),
+            gramWeight: parseNumber(gramWeight)
         });
     }
     catch (err) {

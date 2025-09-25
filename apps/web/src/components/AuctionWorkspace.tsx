@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   AuctionDraft,
   FacebookAuthState,
@@ -6,7 +6,6 @@ import {
   UserProfile
 } from '../state';
 import {
-  checkFacebookSession,
   fetchUserGroups,
   loginWithFacebook,
   scheduleAuction
@@ -41,35 +40,6 @@ const AuctionWorkspace = ({
   const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
-    const initialiseSession = async () => {
-      try {
-        const session = await checkFacebookSession();
-        if (!mounted || !session.isAuthenticated) {
-          return;
-        }
-        onAuth(session);
-        setIsFetchingGroups(true);
-        const fetchedGroups = await fetchUserGroups();
-        if (mounted) {
-          onGroups(fetchedGroups);
-        }
-      } catch (err) {
-        console.warn('Failed to initialise Facebook session', err);
-      } finally {
-        if (mounted) {
-          setIsFetchingGroups(false);
-        }
-      }
-    };
-
-    void initialiseSession();
-    return () => {
-      mounted = false;
-    };
-  }, [onAuth, onGroups]);
-
   const handleFacebookLogin = async () => {
     setIsAuthenticating(true);
     setErrorMessage(null);
@@ -77,8 +47,8 @@ const AuctionWorkspace = ({
     try {
       const authState = await loginWithFacebook();
       onAuth(authState);
-      setScheduleMessage('Connected to Facebook successfully. Loading your groups…');
-      setIsFetchingGroups(true);
+      setScheduleMessage('Connected to Facebook successfully. Loading your groups.');
+
       const result = await fetchUserGroups();
       onGroups(result);
       setScheduleMessage('Facebook account linked and groups synced.');
@@ -87,12 +57,27 @@ const AuctionWorkspace = ({
       setErrorMessage(reason);
     } finally {
       setIsAuthenticating(false);
-      setIsFetchingGroups(false);
     }
   };
 
-  const handleTypeChange = (type: 'post' | 'live') => {
-    onUpdateDraft({ type, intervalBetweenItems: type === 'live' ? 4 : undefined });
+  const handleRefreshGroups = async () => {
+    if (!facebookAuth.isAuthenticated) {
+      setErrorMessage('Reconnect Facebook before refreshing groups.');
+      return;
+    }
+
+    setIsFetchingGroups(true);
+    setErrorMessage(null);
+    try {
+      const result = await fetchUserGroups();
+      onGroups(result);
+      setScheduleMessage('Groups refreshed from Facebook.');
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'Unable to load Facebook groups.';
+      setErrorMessage(reason);
+    } finally {
+      setIsFetchingGroups(false);
+    }
   };
 
   const handleSchedule = async () => {
@@ -124,7 +109,7 @@ const AuctionWorkspace = ({
       <section className="panel-card">
         <div className="panel-header">
           <h2>Facebook connection</h2>
-          <span>{facebookAuth.isAuthenticated ? 'Account linked' : 'Authenticate to access groups'}</span>
+          <span>{facebookAuth.isAuthenticated ? 'Account linked' : 'Reconnect to manage auctions'}</span>
         </div>
         <div className="form-grid">
           <div className="inline-actions">
@@ -132,37 +117,47 @@ const AuctionWorkspace = ({
               <p className="field-label">Status</p>
               <p className="helper-text">
                 {facebookAuth.isAuthenticated
-                  ? `Logged in as ${facebookAuth.userName ?? 'Facebook user'} · Token expires ${facebookAuth.expiresAt}`
-                  : 'Connect your Facebook account to manage group auctions and live feeds.'}
+                  ? `Logged in as ${facebookAuth.userName ?? 'Facebook user'} - Token expires ${facebookAuth.expiresAt}`
+                  : 'Reconnect your Facebook account to manage group auctions and live feeds.'}
               </p>
             </div>
-            <button
-              type="button"
-              className="facebook-button"
-              onClick={handleFacebookLogin}
-              disabled={isAuthenticating}
-            >
-              <svg viewBox="0 0 24 24" fill="currentColor" role="img" aria-hidden>
-                <path d="M13.5 22V12.75H16.5L17 9H13.5V7C13.5 5.97 13.75 5.25 15.23 5.25H17V2.14C16.12 2.04 15.23 2 14.35 2C11.64 2 9.75 3.66 9.75 6.7V9H7V12.75H9.75V22H13.5Z" />
-              </svg>
-              {isAuthenticating ? 'Connecting…' : facebookAuth.isAuthenticated ? 'Reconnect' : 'Login with Facebook'}
-            </button>
+            <div className="button-stack">
+              <button
+                type="button"
+                className="facebook-button"
+                onClick={handleFacebookLogin}
+                disabled={isAuthenticating}
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" role="img" aria-hidden>
+                  <path d="M13.5 22V12.75H16.5L17 9H13.5V7C13.5 5.97 13.75 5.25 15.23 5.25H17V2.14C16.12 2.04 15.23 2 14.35 2C11.64 2 9.75 3.66 9.75 6.7V9H7V12.75H9.75V22H13.5Z" />
+                </svg>
+                {isAuthenticating ? 'Reconnecting...' : 'Reconnect Facebook'}
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={handleRefreshGroups}
+                disabled={isFetchingGroups || !facebookAuth.isAuthenticated}
+              >
+                {isFetchingGroups ? 'Refreshing...' : 'Refresh groups'}
+              </button>
+            </div>
           </div>
           {facebookAuth.isAuthenticated && (
             <div className="list-box">
               <p className="field-label">Available groups</p>
               {isFetchingGroups ? (
-                <p className="helper-text">Fetching your moderated group list…</p>
+                <p className="helper-text">Fetching your moderated group list.</p>
               ) : groups.length === 0 ? (
                 <div className="empty-state">
                   <h3>No groups loaded yet</h3>
-                  <p>Use the button above to refresh groups once you have admin permissions.</p>
+                  <p>Refresh groups once you have admin permissions for your target Facebook communities.</p>
                 </div>
               ) : (
                 <div className="metric-pills">
                   {groups.map((group) => (
                     <span key={group.id} className="metric-pill">
-                      {group.name} · {group.memberCount.toLocaleString()} members
+                      {group.name} - {group.memberCount.toLocaleString()} members
                     </span>
                   ))}
                 </div>
@@ -186,14 +181,14 @@ const AuctionWorkspace = ({
               <button
                 type="button"
                 className={draft.type === 'post' ? 'active' : ''}
-                onClick={() => handleTypeChange('post')}
+                onClick={() => onUpdateDraft({ type: 'post', intervalBetweenItems: undefined })}
               >
                 Individual post
               </button>
               <button
                 type="button"
                 className={draft.type === 'live' ? 'active' : ''}
-                onClick={() => handleTypeChange('live')}
+                onClick={() => onUpdateDraft({ type: 'live', intervalBetweenItems: draft.intervalBetweenItems ?? 4 })}
               >
                 Live feed
               </button>
@@ -218,12 +213,12 @@ const AuctionWorkspace = ({
                 <option value="">Select a group</option>
                 {groups.map((group) => (
                   <option key={group.id} value={group.id}>
-                    {group.name} · {group.memberCount.toLocaleString()} members
+                    {group.name} - {group.memberCount.toLocaleString()} members
                   </option>
                 ))}
               </select>
               {!facebookAuth.isAuthenticated && (
-                <p className="helper-text">Connect Facebook to load the groups you manage.</p>
+                <p className="helper-text">Reconnect Facebook to load the groups you manage.</p>
               )}
             </div>
             <div>
@@ -300,7 +295,7 @@ const AuctionWorkspace = ({
                 id="autoClose"
                 type="number"
                 min={5}
-                value={draft.autoCloseMinutes}
+                value={draft.autoCloseMinutes ?? 60}
                 onChange={(event) => onUpdateDraft({ autoCloseMinutes: Number(event.target.value) })}
               />
             </div>
@@ -336,7 +331,7 @@ const AuctionWorkspace = ({
             <div>
               <p className="helper-text">
                 {disableSchedule
-                  ? 'Complete the fields above and link Facebook to enable scheduling.'
+                  ? 'Complete the fields above and ensure Facebook is connected to enable scheduling.'
                   : 'Ready to launch. We will publish through your connected Facebook session.'}
               </p>
             </div>
@@ -346,7 +341,7 @@ const AuctionWorkspace = ({
               onClick={handleSchedule}
               disabled={disableSchedule}
             >
-              {isScheduling ? 'Scheduling…' : draft.type === 'live' ? 'Start live run' : 'Schedule post'}
+              {isScheduling ? 'Scheduling...' : draft.type === 'live' ? 'Start live run' : 'Schedule post'}
             </button>
           </div>
         </div>
@@ -380,7 +375,7 @@ const AuctionWorkspace = ({
                   <tr key={auction.id}>
                     <td>{auction.id}</td>
                     <td>{auction.type === 'live' ? 'Live feed' : 'Post'}</td>
-                    <td>{auction.itemName || '—'}</td>
+                    <td>{auction.itemName || '-'}</td>
                     <td>
                       {profile.currency} {auction.reservePrice.toFixed(2)}
                     </td>
