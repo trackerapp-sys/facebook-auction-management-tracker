@@ -41,7 +41,7 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const FACEBOOK_REDIRECT_URI =
   process.env.FACEBOOK_REDIRECT_URI || `${SERVER_BASE_URL}/auth/facebook/callback`;
 const FACEBOOK_OAUTH_SCOPES = (process.env.FACEBOOK_OAUTH_SCOPES ||
-  'public_profile,groups_access_member_info,pages_manage_posts,pages_read_engagement'
+  'public_profile'
 )
   .split(',')
   .map((scope) => scope.trim())
