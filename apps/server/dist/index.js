@@ -23,7 +23,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
 const ALLOWED_ORIGINS = new Set([...DEFAULT_ALLOWED_ORIGINS, ...CORS_ADDITIONAL_ORIGINS]);
 const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI || `${SERVER_BASE_URL}/auth/facebook/callback`;
 const FACEBOOK_OAUTH_SCOPES = (process.env.FACEBOOK_OAUTH_SCOPES ||
-    'public_profile,groups_access_member_info,pages_manage_posts,pages_read_engagement')
+    'public_profile')
     .split(',')
     .map((scope) => scope.trim())
     .filter(Boolean);
@@ -220,7 +220,7 @@ app.post('/auctions', async (req, res) => {
         if (!Number.isNaN(numeric)) {
             return numeric.toFixed(2);
         }
-        return 'Ã¢â‚¬â€';
+        return 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â';
     };
     const parseNumber = (input) => {
         if (typeof input === 'number') {
