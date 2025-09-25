@@ -91,7 +91,7 @@ app.use(
     saveUninitialized: false,
     cookie: {
       secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'lax' : 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       httpOnly: true,
       maxAge: 1000 * 60 * 60 * 24 * 7
     }
@@ -317,7 +317,7 @@ app.post('/auctions', async (req: Request, res: Response) => {
     if (!Number.isNaN(numeric)) {
       return numeric.toFixed(2);
     }
-    return 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â';
+    return 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â';
   };
 
   const parseNumber = (input: unknown): number | undefined => {
