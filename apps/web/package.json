@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && node ./node_modules/vite/bin/vite.js build",
+    "build": "tsc -b && npm exec vite build",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -27,3 +27,4 @@
     "vite": "^5.1.0"
   }
 }
+
