@@ -38,6 +38,18 @@ const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const SERVER_BASE_URL = process.env.SERVER_BASE_URL || `http://localhost:${port}`;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+const CORS_ADDITIONAL_ORIGINS = (process.env.CORS_ADDITIONAL_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const DEFAULT_ALLOWED_ORIGINS = [
+  CLIENT_ORIGIN,
+  'https://facebook-auction-app.onrender.com',
+  'https://facebook-group-auction-tracker-app.onrender.com',
+  'https://www.facebook.com',
+  'https://facebook.com'
+];
+const ALLOWED_ORIGINS = new Set([...DEFAULT_ALLOWED_ORIGINS, ...CORS_ADDITIONAL_ORIGINS]);
 const FACEBOOK_REDIRECT_URI =
   process.env.FACEBOOK_REDIRECT_URI || `${SERVER_BASE_URL}/auth/facebook/callback`;
 const FACEBOOK_OAUTH_SCOPES = (process.env.FACEBOOK_OAUTH_SCOPES ||
@@ -54,7 +66,19 @@ if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) {
 app.set('trust proxy', 1);
 app.use(
   cors({
-    origin: CLIENT_ORIGIN,
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (ALLOWED_ORIGINS.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error('Origin ' + origin + ' not allowed by CORS'));
+    },
     credentials: true
   })
 );
@@ -293,7 +317,7 @@ app.post('/auctions', async (req: Request, res: Response) => {
     if (!Number.isNaN(numeric)) {
       return numeric.toFixed(2);
     }
-    return '—';
+    return 'Ã¢â‚¬â€';
   };
 
   const parseNumber = (input: unknown): number | undefined => {
