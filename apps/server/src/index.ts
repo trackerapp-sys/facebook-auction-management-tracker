@@ -240,6 +240,10 @@ app.post('/facebook/data-deletion', (_req, res) => {
   });
 });
 
+app.post('/auctions', async (req: Request, res: Response) => {
+  const auth = req.session.facebookAuth;
+  if (!auth) {
+    res.status(401).json({ error: 'Not authenticated with Facebook' });
     return;
   }
 
@@ -265,7 +269,7 @@ app.post('/facebook/data-deletion', (_req, res) => {
   try {
     if (type === 'post') {
       const postUrl = new URL(`https://graph.facebook.com/v19.0/${groupId}/feed`);
-      const message = `${itemName}\nReserve: ${reservePrice ?? 'â€”'}\nStarting: ${startingPrice ?? 'â€”'}\n\n${safeDescription}`;
+      const message = `${itemName}\nReserve: ${reservePrice ?? '-'}\nStarting: ${startingPrice ?? '-'}\n\n${safeDescription}`;
 
       const body = new URLSearchParams();
       body.set('message', message);
@@ -308,4 +312,3 @@ app.listen(port, () => {
   console.log(`Client origin: ${CLIENT_ORIGIN}`);
   console.log(`Facebook redirect URI: ${FACEBOOK_REDIRECT_URI}`);
 });
-
