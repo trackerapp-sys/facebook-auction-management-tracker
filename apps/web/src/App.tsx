@@ -10,7 +10,7 @@ import { fetchBids } from './api';
 import './App.css';
 
 const WELCOME_ACK_KEY = 'auction-tracker-welcome';
-const WEBSOCKET_URL = 'wss://facebook-auction-api.onrender.com';
+const WEBSOCKET_URL = (import.meta.env.VITE_WEBSOCKET_URL as string) || 'wss://facebook-auction-api.onrender.com';
 
 const splitDateTime = (value?: string): { date?: string; time?: string } => {
   if (!value) {
@@ -43,49 +43,70 @@ function AppShell() {
   }, [hasSeenWelcome]);
 
   useEffect(() => {
-    const ws = new WebSocket(WEBSOCKET_URL);
+    let ws: WebSocket | null = null;
+    let attempt = 0;
+    let closed = false;
+    let timer: number | undefined;
 
-    ws.onopen = () => {
-      console.log('Connected to WebSocket server');
-    };
+    const connect = () => {
+      if (closed) return;
+      const url = `${WEBSOCKET_URL}${WEBSOCKET_URL.includes('?') ? '&' : '?'}t=${Date.now()}`;
+      ws = new WebSocket(url);
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log('WebSocket message received:', data);
+      ws.onopen = () => {
+        attempt = 0;
+        console.log('Connected to WebSocket server');
+      };
 
-        if (data.object === 'page' && data.entry) {
-          for (const entry of data.entry) {
-            for (const change of entry.changes) {
-              if (change.field === 'feed' && change.value.item === 'comment') {
-                const { post_id, from, message } = change.value;
-                const auctionId = post_id;
-                const leadingBidder = from.name;
-                
-                // Simple bid parsing: extract the first number from the message
-                const bidMatch = message.match(/\d+/);
-                if (bidMatch) {
-                  const currentBid = parseInt(bidMatch[0], 10);
-                  dispatch({ 
-                    type: 'update-auction', 
-                    payload: { id: auctionId, currentBid, leadingBidder } 
-                  });
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('WebSocket message received:', data);
+
+          if (data.object === 'page' && data.entry) {
+            for (const entry of data.entry) {
+              for (const change of entry.changes) {
+                if (change.field === 'feed' && change.value.item === 'comment') {
+                  const { post_id, from, message } = change.value;
+                  const auctionId = post_id;
+                  const leadingBidder = from.name;
+                  
+                  // Simple bid parsing: extract the first number from the message
+                  const bidMatch = message.match(/\d+/);
+                  if (bidMatch) {
+                    const currentBid = parseInt(bidMatch[0], 10);
+                    dispatch({ 
+                      type: 'update-auction', 
+                      payload: { id: auctionId, currentBid, leadingBidder } 
+                    });
+                  }
                 }
               }
             }
           }
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
         }
-      } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
-      }
+      };
+
+      ws.onclose = (ev) => {
+        console.log('Disconnected from WebSocket server', ev.code, ev.reason);
+        if (closed) return;
+        const delay = Math.min(30000, 1000 * Math.pow(2, attempt++));
+        timer = window.setTimeout(connect, delay);
+      };
+
+      ws.onerror = (err) => {
+        console.error('WebSocket error:', err);
+      };
     };
 
-    ws.onclose = () => {
-      console.log('Disconnected from WebSocket server');
-    };
+    connect();
 
     return () => {
-      ws.close();
+      closed = true;
+      if (timer) window.clearTimeout(timer);
+      if (ws) ws.close();
     };
   }, [dispatch]);
 
