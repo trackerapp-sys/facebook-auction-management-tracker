@@ -62,8 +62,8 @@ export type AppStateAction =
   | { type: 'complete-onboarding'; payload: UserProfile }
   | { type: 'update-auction-draft'; payload: Partial<AuctionDraft> }
   | { type: 'add-auction'; payload: AuctionDraft }
-  | { type: 'delete-auction'; payload: string };
-
+  | { type: 'delete-auction'; payload: string }
+  | { type: 'update-auction'; payload: { id: string } & Partial<AuctionDraft> };
 const STORAGE_KEY = 'auction-tracker-state';
 const STATE_VERSION = 5;
 
@@ -157,11 +157,19 @@ function appStateReducer(state: AppState, action: AppStateAction): AppState {
         ...state,
         previousAuctions: state.previousAuctions.filter((auction) => auction.id !== action.payload)
       };
+    case 'update-auction':
+      return {
+        ...state,
+        previousAuctions: state.previousAuctions.map((auction) =>
+          auction.id === action.payload.id
+            ? { ...auction, ...action.payload }
+            : auction
+        )
+      };
     default:
       return state;
   }
 }
-
 const AppStateContext = createContext<{
   state: AppState;
   dispatch: (action: AppStateAction) => void;

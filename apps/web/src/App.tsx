@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+'''import { useEffect, useMemo, useState } from 'react';
 import { AppStateProvider, useAppState } from './state';
 import type { AuctionDraft } from './state';
 import OnboardingWizard from './components/OnboardingWizard';
@@ -9,6 +9,7 @@ import WelcomeScreen from './components/WelcomeScreen';
 import './App.css';
 
 const WELCOME_ACK_KEY = 'auction-tracker-welcome';
+const WEBSOCKET_URL = 'wss://facebook-auction-api.onrender.com';
 
 const splitDateTime = (value?: string): { date?: string; time?: string } => {
   if (!value) {
@@ -39,6 +40,53 @@ function AppShell() {
       window.localStorage.setItem(WELCOME_ACK_KEY, 'true');
     }
   }, [hasSeenWelcome]);
+
+  useEffect(() => {
+    const ws = new WebSocket(WEBSOCKET_URL);
+
+    ws.onopen = () => {
+      console.log('Connected to WebSocket server');
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('WebSocket message received:', data);
+
+        if (data.object === 'page' && data.entry) {
+          for (const entry of data.entry) {
+            for (const change of entry.changes) {
+              if (change.field === 'feed' && change.value.item === 'comment') {
+                const { post_id, from, message } = change.value;
+                const auctionId = post_id;
+                const leadingBidder = from.name;
+                
+                // Simple bid parsing: extract the first number from the message
+                const bidMatch = message.match(/\d+/);
+                if (bidMatch) {
+                  const currentBid = parseInt(bidMatch[0], 10);
+                  dispatch({ 
+                    type: 'update-auction', 
+                    payload: { id: auctionId, currentBid, leadingBidder } 
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log('Disconnected from WebSocket server');
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [dispatch]);
 
   useEffect(() => {
     if (activeSection === 'auctions/create-post' && auctionDraft.type !== 'post') {
@@ -200,3 +248,4 @@ function App() {
 }
 
 export default App;
+'''
