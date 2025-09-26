@@ -31,6 +31,29 @@ export async function fetchBids(auctionId) {
   return response.json();
 }
 
+export async function listPages() {
+  const response = await fetch(`${API_BASE_URL}/facebook/pages`, {
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to load pages');
+  }
+  return response.json();
+}
+
+export async function subscribePage(pageId) {
+  const response = await fetch(`${API_BASE_URL}/facebook/pages/${pageId}/subscribe`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to subscribe page');
+  }
+  return response.json();
+}
+
 export async function fetchBidsByUrl(postUrl) {
   const url = new URL(`${API_BASE_URL}/auctions/by-url`);
   url.searchParams.set('url', postUrl);

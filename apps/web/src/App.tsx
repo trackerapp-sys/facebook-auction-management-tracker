@@ -6,6 +6,7 @@ import AuctionWorkspace, { type AuctionViewMode } from './components/AuctionWork
 import Sidebar, { type SectionKey } from './components/Sidebar';
 import DashboardOverview from './components/DashboardOverview';
 import WelcomeScreen from './components/WelcomeScreen';
+import Settings from './components/Settings';
 import { fetchBids, fetchBidsByUrl } from './api';
 import './App.css';
 
@@ -278,6 +279,10 @@ function AppShell() {
           onNavigate={setActiveSection}
         />
       );
+    }
+
+    if (activeSection === 'settings') {
+      return <Settings />;
     }
 
     return (
