@@ -142,17 +142,17 @@ app.post('/webhook/facebook', (req, res) => {
 });
 
 app.get('/auctions/:id', async (req: Request, res: Response) => {
-  const auth = req.session.facebookAuth;
-  if (!auth) {
-    res.status(401).json({ error: 'Not authenticated with Facebook' });
+  if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) {
+    res.status(500).json({ error: 'Facebook app credentials not configured' });
     return;
   }
 
   const { id } = req.params;
+  const appAccessToken = `${FACEBOOK_APP_ID}|${FACEBOOK_APP_SECRET}`;
 
   try {
     const graphUrl = new URL(`https://graph.facebook.com/v19.0/${id}/comments`);
-    graphUrl.searchParams.set('access_token', auth.accessToken);
+    graphUrl.searchParams.set('access_token', appAccessToken);
 
     const graphResponse = await fetch(graphUrl);
     const graphPayload = await graphResponse.json();
