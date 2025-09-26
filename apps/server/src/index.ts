@@ -103,7 +103,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'https://facebook-auction-app.onrender.com',
   'https://facebook-group-auction-tracker-app.onrender.com',
   'https://www.facebook.com',
-  'https://facebook.com'
+  'https://facebook.com',
+  'https://m.facebook.com'
 ];
 const ALLOWED_ORIGINS = new Set([...DEFAULT_ALLOWED_ORIGINS, ...CORS_ADDITIONAL_ORIGINS]);
 const FACEBOOK_REDIRECT_URI =
