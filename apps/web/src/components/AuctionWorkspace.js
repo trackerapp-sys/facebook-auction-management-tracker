@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useMemo, useState } from 'react';
-import { scheduleAuction } from '../services';
+import { scheduleAuction } from '../api';
 const CARAT_TO_GRAM = 0.2;
 const combineDateTime = (date, time) => {
     if (!date || !time) {

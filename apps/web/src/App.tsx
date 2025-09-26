@@ -6,7 +6,7 @@ import AuctionWorkspace, { type AuctionViewMode } from './components/AuctionWork
 import Sidebar, { type SectionKey } from './components/Sidebar';
 import DashboardOverview from './components/DashboardOverview';
 import WelcomeScreen from './components/WelcomeScreen';
-import { fetchBids } from './services';
+import { fetchBids } from './api';
 import './App.css';
 
 const WELCOME_ACK_KEY = 'auction-tracker-welcome';
