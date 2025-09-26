@@ -94,6 +94,8 @@ const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const INGEST_TOKEN = process.env.INGEST_TOKEN;
 const SERVER_BASE_URL = process.env.SERVER_BASE_URL || `http://localhost:${port}`;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+// Cache Page access tokens in-memory for webhook-related operations
+const PAGE_TOKENS = new Map<string, string>();
 const CORS_ADDITIONAL_ORIGINS = (process.env.CORS_ADDITIONAL_ORIGINS || '')
   .split(',')
   .map((origin) => origin.trim())
@@ -110,7 +112,8 @@ const ALLOWED_ORIGINS = new Set([...DEFAULT_ALLOWED_ORIGINS, ...CORS_ADDITIONAL_
 const FACEBOOK_REDIRECT_URI =
   process.env.FACEBOOK_REDIRECT_URI || `${SERVER_BASE_URL}/auth/facebook/callback`;
 const FACEBOOK_OAUTH_SCOPES = (process.env.FACEBOOK_OAUTH_SCOPES ||
-  'public_profile'
+  // Include Page permissions to enable webhooks for instant updates
+  'public_profile,pages_show_list,pages_manage_metadata,pages_read_engagement'
 )
   .split(',')
   .map((scope) => scope.trim())
@@ -490,6 +493,93 @@ app.get('/auth/facebook/session', (req: Request, res: Response) => {
 app.post('/auth/facebook/logout', (req: Request, res: Response) => {
   req.session.facebookAuth = undefined;
   res.json({ success: true });
+});
+
+app.get('/facebook/pages', async (req: Request, res: Response) => {
+  const auth = req.session.facebookAuth;
+  if (!auth) {
+    res.status(401).json({ error: 'Not authenticated with Facebook' });
+    return;
+  }
+
+  try {
+    const accountsUrl = new URL('https://graph.facebook.com/v19.0/me/accounts');
+    accountsUrl.searchParams.set('fields', 'id,name,access_token');
+    accountsUrl.searchParams.set('access_token', auth.accessToken);
+
+    const accountsResponse = await fetch(accountsUrl);
+    const accountsPayload = await accountsResponse.json();
+
+    if (!accountsResponse.ok) {
+      const { error: graphError } = accountsPayload as { error?: GraphError };
+      throw new Error(graphError?.message || 'Failed to load pages');
+    }
+
+    const { data } = accountsPayload as { data: Array<{ id: string; name: string; access_token?: string }> };
+
+    // Save tokens in cache for convenience
+    data.forEach((p) => { if (p.access_token) PAGE_TOKENS.set(p.id, p.access_token); });
+
+    res.json(data.map(p => ({ id: p.id, name: p.name, hasToken: Boolean(p.access_token) })));
+  } catch (err) {
+    console.error('Error fetching Facebook pages', err);
+    res.status(502).json({ error: 'Unable to fetch pages from Facebook' });
+  }
+});
+
+app.post('/facebook/pages/:id/subscribe', async (req: Request, res: Response) => {
+  const auth = req.session.facebookAuth;
+  if (!auth) {
+    res.status(401).json({ error: 'Not authenticated with Facebook' });
+    return;
+  }
+
+  const { id } = req.params;
+  try {
+    let pageToken = PAGE_TOKENS.get(id);
+    if (!pageToken) {
+      // Fetch pages to find token
+      const accountsUrl = new URL('https://graph.facebook.com/v19.0/me/accounts');
+      accountsUrl.searchParams.set('fields', 'id,name,access_token');
+      accountsUrl.searchParams.set('access_token', auth.accessToken);
+      const accountsResponse = await fetch(accountsUrl);
+      const accountsPayload = await accountsResponse.json();
+      if (!accountsResponse.ok) {
+        const { error: graphError } = accountsPayload as { error?: GraphError };
+        throw new Error(graphError?.message || 'Failed to load pages');
+      }
+      const { data } = accountsPayload as { data: Array<{ id: string; access_token?: string }> };
+      const found = data.find(p => p.id === id);
+      if (found?.access_token) {
+        pageToken = found.access_token;
+        PAGE_TOKENS.set(id, pageToken);
+      }
+    }
+
+    if (!pageToken) {
+      res.status(400).json({ error: 'Page access token not available. Ensure permissions and try again.' });
+      return;
+    }
+
+    // Subscribe the app to this page's webhooks for feed updates
+    const subUrl = new URL(`https://graph.facebook.com/v19.0/${id}/subscribed_apps`);
+    const body = new URLSearchParams();
+    body.set('subscribed_fields', 'feed');
+    body.set('access_token', pageToken);
+
+    const subResponse = await fetch(subUrl, { method: 'POST', body });
+    const subPayload = await subResponse.json();
+
+    if (!subResponse.ok) {
+      const { error: graphError } = subPayload as { error?: GraphError };
+      throw new Error(graphError?.message || 'Failed to subscribe app to page');
+    }
+
+    res.json({ success: true, pageId: id });
+  } catch (err) {
+    console.error('Error subscribing to page', err);
+    res.status(502).json({ error: 'Unable to subscribe to page webhooks' });
+  }
 });
 
 app.get('/facebook/groups', async (req: Request, res: Response) => {
