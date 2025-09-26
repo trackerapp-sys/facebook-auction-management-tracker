@@ -7,7 +7,16 @@ import Sidebar from './components/Sidebar';
 import DashboardOverview from './components/DashboardOverview';
 import WelcomeScreen from './components/WelcomeScreen';
 import './App.css';
-const WELCOME_ACK_KEY = 'facebook-auction-welcome-ack';
+const WELCOME_ACK_KEY = 'auction-tracker-welcome';
+const splitDateTime = (value) => {
+    if (!value) {
+        return {};
+    }
+    return {
+        date: value.slice(0, 10),
+        time: value.slice(11, 16)
+    };
+};
 function AppShell() {
     const { state: { profile, auctionDraft, previousAuctions }, dispatch } = useAppState();
     const [activeSection, setActiveSection] = useState('overview');
@@ -22,6 +31,14 @@ function AppShell() {
             window.localStorage.setItem(WELCOME_ACK_KEY, 'true');
         }
     }, [hasSeenWelcome]);
+    useEffect(() => {
+        if (activeSection === 'auctions/create-post' && auctionDraft.type !== 'post') {
+            dispatch({ type: 'update-auction-draft', payload: { type: 'post' } });
+        }
+        if (activeSection === 'auctions/create-live' && auctionDraft.type !== 'live') {
+            dispatch({ type: 'update-auction-draft', payload: { type: 'live' } });
+        }
+    }, [activeSection, auctionDraft.type, dispatch]);
     const sectionTitle = useMemo(() => {
         switch (activeSection) {
             case 'auctions/create-post':
@@ -43,9 +60,9 @@ function AppShell() {
     const headerSubtitle = useMemo(() => {
         switch (activeSection) {
             case 'auctions/create-post':
-                return 'Craft a single post auction ready to publish to your chosen group.';
+                return 'Draft a Facebook post auction and capture the essential details.';
             case 'auctions/create-live':
-                return 'Set up a sequenced live auction with pacing and bid controls.';
+                return 'Plan pacing, increments, and run sheets for your live feed auctions.';
             case 'auctions/manage':
                 return 'Keep auctions organised, record bids, and stay on top of follow-ups.';
             case 'inventory':
@@ -60,6 +77,25 @@ function AppShell() {
     }, [activeSection]);
     const handleWelcomeBegin = () => {
         setHasSeenWelcome(true);
+    };
+    const handleSchedule = (auction) => {
+        dispatch({ type: 'add-auction', payload: auction });
+    };
+    const handleDeleteAuction = (id) => {
+        dispatch({ type: 'delete-auction', payload: id });
+    };
+    const handleEditAuction = (auction) => {
+        const { date: endDate, time: endTime } = splitDateTime(auction.endDateTime);
+        dispatch({
+            type: 'update-auction-draft',
+            payload: {
+                ...auction,
+                status: 'draft',
+                endDate,
+                endTime
+            }
+        });
+        setActiveSection(auction.type === 'live' ? 'auctions/create-live' : 'auctions/create-post');
     };
     if (!profile) {
         if (!hasSeenWelcome) {
@@ -76,19 +112,9 @@ function AppShell() {
         }
         return 'manage';
     };
-    const handleSchedule = (auction) => {
-        dispatch({ type: 'add-auction', payload: auction });
-    };
-    const handleDeleteAuction = (id) => {
-        dispatch({ type: 'delete-auction', payload: id });
-    };
-    const handleEditAuction = (auction) => {
-        dispatch({ type: 'update-auction-draft', payload: { ...auction, status: 'draft' } });
-        setActiveSection(auction.type === 'live' ? 'auctions/create-live' : 'auctions/create-post');
-    };
     const renderActiveSection = () => {
         if (activeSection === 'overview') {
-            return (_jsx(DashboardOverview, { currency: profile.currency, previousAuctions: previousAuctions, onEditAuction: handleEditAuction, onDeleteAuction: handleDeleteAuction }));
+            return (_jsx(DashboardOverview, { currency: profile.currency, timeZone: profile.timeZone, previousAuctions: previousAuctions, onEditAuction: handleEditAuction, onDeleteAuction: handleDeleteAuction }));
         }
         if (activeSection.startsWith('auctions')) {
             return (_jsx(AuctionWorkspace, { mode: resolveAuctionMode(), profile: profile, draft: auctionDraft, previousAuctions: previousAuctions, onUpdateDraft: (payload) => dispatch({ type: 'update-auction-draft', payload }), onSchedule: handleSchedule, onDeleteAuction: handleDeleteAuction, onEditAuction: handleEditAuction, onNavigate: setActiveSection }));

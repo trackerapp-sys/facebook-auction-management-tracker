@@ -5,9 +5,6 @@ const combineDateTime = (date, time) => {
     return `${date}T${time}`;
 };
 const minutesBetween = (startISO, endISO) => {
-    if (!startISO || !endISO) {
-        return undefined;
-    }
     const start = new Date(startISO).getTime();
     const end = new Date(endISO).getTime();
     if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
@@ -16,10 +13,9 @@ const minutesBetween = (startISO, endISO) => {
     return Math.round((end - start) / 60000);
 };
 export async function scheduleAuction(draft) {
-    const startISO = draft.startDateTime ?? combineDateTime(draft.startDate, draft.startTime);
+    const resolvedStart = draft.startDateTime ?? new Date().toISOString();
     const endISO = draft.endDateTime ?? combineDateTime(draft.endDate, draft.endTime);
-    const computedDuration = draft.durationMinutes ?? minutesBetween(startISO, endISO) ?? 60;
-    const resolvedStart = startISO ?? new Date().toISOString();
+    const computedDuration = endISO ? minutesBetween(resolvedStart, endISO) ?? draft.durationMinutes ?? 60 : draft.durationMinutes ?? 60;
     const resolvedEnd = endISO ?? new Date(new Date(resolvedStart).getTime() + computedDuration * 60000).toISOString();
     const auctionId = draft.id.startsWith('draft-') ? `auction-${Date.now()}` : draft.id;
     return {
@@ -33,7 +29,8 @@ export async function scheduleAuction(draft) {
         durationMinutes: computedDuration,
         caratWeight: draft.caratWeight,
         gramWeight: draft.gramWeight,
-        groupUrl: draft.groupUrl?.trim() ? draft.groupUrl : undefined,
-        postUrl: draft.postUrl?.trim() ? draft.postUrl : undefined
+        postUrl: draft.postUrl?.trim() ? draft.postUrl : undefined,
+        intervalBetweenItems: draft.intervalBetweenItems,
+        autoCloseMinutes: draft.autoCloseMinutes
     };
 }

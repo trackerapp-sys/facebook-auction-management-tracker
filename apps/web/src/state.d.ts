@@ -27,27 +27,23 @@ export interface UserProfile {
 export interface AuctionDraft {
     id: string;
     type: AuctionType;
-    groupName?: string;
-    groupUrl?: string;
-    postUrl?: string;
     itemName: string;
     description: string;
     reservePrice: number;
     startingPrice: number;
-    currentBid?: number;
-    leadingBidder?: string;
     bidIncrement: number;
-    caratWeight?: number;
-    gramWeight?: number;
-    startDate?: string;
-    startTime?: string;
+    postUrl?: string;
     endDate?: string;
     endTime?: string;
-    startDateTime?: string;
     endDateTime?: string;
+    startDateTime?: string;
     durationMinutes?: number;
-    autoCloseMinutes?: number;
+    caratWeight?: number;
+    gramWeight?: number;
     intervalBetweenItems?: number;
+    autoCloseMinutes?: number;
+    currentBid?: number;
+    leadingBidder?: string;
     status: 'draft' | 'scheduled' | 'live' | 'closed';
 }
 export interface AppState {

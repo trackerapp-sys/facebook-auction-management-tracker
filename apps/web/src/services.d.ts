@@ -10,8 +10,9 @@ type AuctionResponse = {
     durationMinutes?: number;
     caratWeight?: number;
     gramWeight?: number;
-    groupUrl?: string;
     postUrl?: string;
+    intervalBetweenItems?: number;
+    autoCloseMinutes?: number;
 };
 export declare function scheduleAuction(draft: AuctionDraft): Promise<AuctionResponse>;
 export {};

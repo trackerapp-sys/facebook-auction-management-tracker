@@ -2,30 +2,10 @@ import type { AuctionDraft } from '../state';
 
 type DashboardOverviewProps = {
   currency: string;
+  timeZone: string;
   previousAuctions: AuctionDraft[];
   onEditAuction: (auction: AuctionDraft) => void;
   onDeleteAuction: (id: string) => void;
-};
-
-const formatDateTime = (value?: string) => {
-  if (!value) {
-    return '-';
-  }
-
-  try {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return '-';
-    }
-    return date.toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  } catch {
-    return value;
-  }
 };
 
 const formatCurrency = (currency: string, value?: number) => {
@@ -36,9 +16,37 @@ const formatCurrency = (currency: string, value?: number) => {
   return `${currency} ${value.toFixed(2)}`;
 };
 
-const DashboardOverview = ({ currency, previousAuctions, onEditAuction, onDeleteAuction }: DashboardOverviewProps) => {
+const DashboardOverview = ({
+  currency,
+  timeZone,
+  previousAuctions,
+  onEditAuction,
+  onDeleteAuction
+}: DashboardOverviewProps) => {
   const activeAuctions = previousAuctions.filter((auction) => auction.status === 'scheduled' || auction.status === 'live');
   const completedAuctions = previousAuctions.filter((auction) => auction.status === 'closed');
+
+  const formatDateTime = (value?: string) => {
+    if (!value) {
+      return '-';
+    }
+
+    try {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return '-';
+      }
+      return new Intl.DateTimeFormat(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone
+      }).format(date);
+    } catch {
+      return value;
+    }
+  };
 
   return (
     <div className="dashboard-wrapper">
@@ -80,11 +88,10 @@ const DashboardOverview = ({ currency, previousAuctions, onEditAuction, onDelete
                   <th>Type</th>
                   <th>Item</th>
                   <th>Current bid</th>
-                  <th>Bidder</th>
+                  <th>Leading bidder</th>
                   <th>Reserve</th>
                   <th>Starting</th>
-                  <th>Start</th>
-                  <th>End</th>
+                  <th>Ends</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -103,7 +110,6 @@ const DashboardOverview = ({ currency, previousAuctions, onEditAuction, onDelete
                     <td>{auction.leadingBidder || '-'}</td>
                     <td>{formatCurrency(currency, auction.reservePrice)}</td>
                     <td>{formatCurrency(currency, auction.startingPrice)}</td>
-                    <td>{formatDateTime(auction.startDateTime)}</td>
                     <td>{formatDateTime(auction.endDateTime)}</td>
                     <td>
                       <div className="table-actions">

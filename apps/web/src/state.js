@@ -1,20 +1,17 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import { createContext, useContext, useEffect, useReducer } from 'react';
 const STORAGE_KEY = 'auction-tracker-state';
-const STATE_VERSION = 4;
+const STATE_VERSION = 5;
 const defaultAuctionDraft = {
     id: 'draft-1',
     type: 'post',
-    groupName: '',
-    groupUrl: '',
-    postUrl: '',
     itemName: '',
     description: '',
     reservePrice: 0,
     startingPrice: 0,
-    currentBid: 0,
-    leadingBidder: '',
     bidIncrement: 1,
+    intervalBetweenItems: 4,
+    autoCloseMinutes: 60,
     status: 'draft'
 };
 const initialState = {

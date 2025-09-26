@@ -32,27 +32,23 @@ export interface UserProfile {
 export interface AuctionDraft {
   id: string;
   type: AuctionType;
-  groupName?: string;
-  groupUrl?: string;
-  postUrl?: string;
   itemName: string;
   description: string;
   reservePrice: number;
   startingPrice: number;
-  currentBid?: number;
-  leadingBidder?: string;
   bidIncrement: number;
-  caratWeight?: number;
-  gramWeight?: number;
-  startDate?: string;
-  startTime?: string;
+  postUrl?: string;
   endDate?: string;
   endTime?: string;
-  startDateTime?: string;
   endDateTime?: string;
+  startDateTime?: string;
   durationMinutes?: number;
-  autoCloseMinutes?: number;
+  caratWeight?: number;
+  gramWeight?: number;
   intervalBetweenItems?: number;
+  autoCloseMinutes?: number;
+  currentBid?: number;
+  leadingBidder?: string;
   status: 'draft' | 'scheduled' | 'live' | 'closed';
 }
 
@@ -69,21 +65,18 @@ export type AppStateAction =
   | { type: 'delete-auction'; payload: string };
 
 const STORAGE_KEY = 'auction-tracker-state';
-const STATE_VERSION = 4;
+const STATE_VERSION = 5;
 
 const defaultAuctionDraft: AuctionDraft = {
   id: 'draft-1',
   type: 'post',
-  groupName: '',
-  groupUrl: '',
-  postUrl: '',
   itemName: '',
   description: '',
   reservePrice: 0,
   startingPrice: 0,
-  currentBid: 0,
-  leadingBidder: '',
   bidIncrement: 1,
+  intervalBetweenItems: 4,
+  autoCloseMinutes: 60,
   status: 'draft'
 };
 

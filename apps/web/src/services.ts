@@ -11,8 +11,9 @@ type AuctionResponse = {
   durationMinutes?: number;
   caratWeight?: number;
   gramWeight?: number;
-  groupUrl?: string;
   postUrl?: string;
+  intervalBetweenItems?: number;
+  autoCloseMinutes?: number;
 };
 
 const combineDateTime = (date?: string, time?: string) => {
@@ -22,11 +23,7 @@ const combineDateTime = (date?: string, time?: string) => {
   return `${date}T${time}`;
 };
 
-const minutesBetween = (startISO?: string, endISO?: string): number | undefined => {
-  if (!startISO || !endISO) {
-    return undefined;
-  }
-
+const minutesBetween = (startISO: string, endISO: string): number | undefined => {
   const start = new Date(startISO).getTime();
   const end = new Date(endISO).getTime();
   if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
@@ -37,11 +34,10 @@ const minutesBetween = (startISO?: string, endISO?: string): number | undefined 
 };
 
 export async function scheduleAuction(draft: AuctionDraft): Promise<AuctionResponse> {
-  const startISO = draft.startDateTime ?? combineDateTime(draft.startDate, draft.startTime);
+  const resolvedStart = draft.startDateTime ?? new Date().toISOString();
   const endISO = draft.endDateTime ?? combineDateTime(draft.endDate, draft.endTime);
-  const computedDuration = draft.durationMinutes ?? minutesBetween(startISO, endISO) ?? 60;
 
-  const resolvedStart = startISO ?? new Date().toISOString();
+  const computedDuration = endISO ? minutesBetween(resolvedStart, endISO) ?? draft.durationMinutes ?? 60 : draft.durationMinutes ?? 60;
   const resolvedEnd = endISO ?? new Date(new Date(resolvedStart).getTime() + computedDuration * 60000).toISOString();
 
   const auctionId = draft.id.startsWith('draft-') ? `auction-${Date.now()}` : draft.id;
@@ -57,7 +53,8 @@ export async function scheduleAuction(draft: AuctionDraft): Promise<AuctionRespo
     durationMinutes: computedDuration,
     caratWeight: draft.caratWeight,
     gramWeight: draft.gramWeight,
-    groupUrl: draft.groupUrl?.trim() ? draft.groupUrl : undefined,
-    postUrl: draft.postUrl?.trim() ? draft.postUrl : undefined
+    postUrl: draft.postUrl?.trim() ? draft.postUrl : undefined,
+    intervalBetweenItems: draft.intervalBetweenItems,
+    autoCloseMinutes: draft.autoCloseMinutes
   };
 }
