@@ -1,4 +1,4 @@
-'''const combineDateTime = (date, time) => {
+const combineDateTime = (date, time) => {
     if (!date || !time) {
         return undefined;
     }
@@ -48,4 +48,3 @@ export async function fetchBids(auctionId) {
         leadingBidder: randomBidder,
     };
 }
-'''
