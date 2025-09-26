@@ -148,6 +148,11 @@ app.get('/auctions/:id', async (req: Request, res: Response) => {
   }
 
   const { id } = req.params;
+  const isValidId = /^\d+(_\d+)?$/.test(id);
+  if (!isValidId) {
+    res.status(400).json({ error: 'Invalid auction id. Provide a numeric Facebook post ID (e.g., 1234567890 or groupId_postId).' });
+    return;
+  }
   const appAccessToken = `${FACEBOOK_APP_ID}|${FACEBOOK_APP_SECRET}`;
 
   try {

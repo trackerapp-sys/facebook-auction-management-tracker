@@ -164,11 +164,51 @@ function AppShell() {
   };
 
   const handleFetchBids = async (auctionId: string) => {
+    const isGraphId = (id: string) => /^\d+(_\d+)?$/.test(id);
+
+    const extractGraphPostId = (url?: string): string | null => {
+      if (!url) return null;
+      try {
+        const u = new URL(url);
+        const parts = u.pathname.split('/').filter(Boolean);
+
+        // Match /groups/{groupId}/posts/{postId}
+        const groupsIdx = parts.indexOf('groups');
+        const postsIdx = parts.indexOf('posts');
+        if (groupsIdx !== -1 && postsIdx !== -1 && parts[groupsIdx + 1] && parts[postsIdx + 1]) {
+          const groupId = parts[groupsIdx + 1];
+          const postId = parts[postsIdx + 1];
+          if (/^\d+$/.test(groupId) && /^\d+$/.test(postId)) {
+            return `${groupId}_${postId}`;
+          }
+        }
+
+        // Match permalink/{postId} or posts/{postId}
+        const permalinkIdx = parts.indexOf('permalink');
+        if (permalinkIdx !== -1 && parts[permalinkIdx + 1] && /^\d+$/.test(parts[permalinkIdx + 1])) {
+          return parts[permalinkIdx + 1];
+        }
+        if (postsIdx !== -1 && parts[postsIdx + 1] && /^\d+$/.test(parts[postsIdx + 1])) {
+          return parts[postsIdx + 1];
+        }
+      } catch {
+        // ignore parse errors
+      }
+      return null;
+    };
+
     try {
-      const bidData = await fetchBids(auctionId);
+      const auction = previousAuctions.find(a => a.id === auctionId);
+      const derivedId = isGraphId(auctionId) ? auctionId : extractGraphPostId(auction?.postUrl);
+      if (!derivedId) {
+        console.error('Cannot fetch bids: provide a valid Facebook post URL or Graph post ID for this auction.');
+        return;
+      }
+
+      const bidData = await fetchBids(derivedId);
+      // Keep the local auction id but update with fetched data
       dispatch({ type: 'update-auction', payload: { id: auctionId, ...bidData } });
     } catch (err) {
-      // In a real app, you'd want to show an error to the user
       console.error('Failed to fetch bids:', err);
     }
   };
