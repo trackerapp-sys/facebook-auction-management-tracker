@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Auction Scraper Options</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 16px; }
+      label { display: block; margin: 8px 0 4px; font-weight: 600; }
+      input { width: 420px; padding: 6px 8px; }
+      button { margin-top: 12px; padding: 6px 10px; }
+      .small { color: #6b7280; }
+    </style>
+  </head>
+  <body>
+    <h2>Auction Scraper Settings</h2>
+    <label for="apiBase">API Base URL</label>
+    <input id="apiBase" placeholder="https://facebook-auction-api.onrender.com" />
+    <div class="small">Leave default unless you host your own API.</div>
+
+    <label for="ingestToken">Ingest Token</label>
+    <input id="ingestToken" placeholder="paste your INGEST_TOKEN here" />
+    <div class="small">Get this from your server configuration.</div>
+
+    <div>
+      <button id="saveBtn">Save</button>
+      <span id="status" class="small"></span>
+    </div>
+
+    <script>
+      (async function() {
+        const existing = await chrome.storage.sync.get(['apiBase', 'ingestToken']);
+        document.getElementById('apiBase').value = existing.apiBase || 'https://facebook-auction-api.onrender.com';
+        document.getElementById('ingestToken').value = existing.ingestToken || '';
+
+        document.getElementById('saveBtn').addEventListener('click', async () => {
+          const apiBase = document.getElementById('apiBase').value.trim();
+          const ingestToken = document.getElementById('ingestToken').value.trim();
+          await chrome.storage.sync.set({ apiBase, ingestToken });
+          document.getElementById('status').textContent = 'Saved';
+          setTimeout(() => (document.getElementById('status').textContent = ''), 1500);
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -91,6 +91,7 @@ const port = Number(process.env.PORT) || 4000;
 
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
+const INGEST_TOKEN = process.env.INGEST_TOKEN;
 const SERVER_BASE_URL = process.env.SERVER_BASE_URL || `http://localhost:${port}`;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const CORS_ADDITIONAL_ORIGINS = (process.env.CORS_ADDITIONAL_ORIGINS || '')
@@ -685,6 +686,40 @@ app.post('/auctions', async (req: Request, res: Response) => {
     console.error('Error scheduling auction', err);
     res.status(502).json({ error: 'Unable to schedule auction with Facebook' });
   }
+});
+
+app.post('/auctions/ingest', (req: Request, res: Response) => {
+  const auth = req.headers['authorization'] || '';
+  const token = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!INGEST_TOKEN || token !== INGEST_TOKEN) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const { postUrl, currentBid, leadingBidder } = req.body as Record<string, unknown>;
+  if (typeof postUrl !== 'string' || postUrl.trim() === '') {
+    res.status(400).json({ error: 'postUrl is required' });
+    return;
+  }
+  const bidNumber = typeof currentBid === 'number' ? currentBid : Number(currentBid);
+  if (!Number.isFinite(bidNumber)) {
+    res.status(400).json({ error: 'currentBid must be a number' });
+    return;
+  }
+  const name = typeof leadingBidder === 'string' ? leadingBidder : undefined;
+
+  const message = { type: 'ingest-bid', payload: { postUrl, currentBid: bidNumber, leadingBidder: name } };
+
+  // Broadcast via WebSocket
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(message));
+    }
+  });
+  // Broadcast via SSE
+  broadcastSSE(message);
+
+  res.json({ ok: true });
 });
 
 app.get('/events', (req: Request, res: Response) => {
