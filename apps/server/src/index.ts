@@ -66,6 +66,19 @@ function extractGraphPostIdFromUrl(urlString: string): string | null {
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
+const sseClients = new Set<Response>();
+
+function broadcastSSE(data: unknown) {
+  const payload = `data: ${JSON.stringify(data)}\n\n`;
+  for (const res of sseClients) {
+    try {
+      res.write(payload);
+    } catch (e) {
+      // drop broken client
+      sseClients.delete(res);
+    }
+  }
+}
 
 wss.on('connection', (ws) => {
   console.log('Client connected');
@@ -161,12 +174,15 @@ app.get('/webhook/facebook', (req, res) => {
 app.post('/webhook/facebook', (req, res) => {
   console.log('Facebook webhook event received:', JSON.stringify(req.body, null, 2));
 
-  // Broadcast the event to all connected clients
+  // Broadcast the event to all connected clients (WebSocket)
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(JSON.stringify(req.body));
     }
   });
+
+  // Broadcast to SSE clients
+  broadcastSSE(req.body);
 
   res.sendStatus(200);
 });
@@ -603,6 +619,36 @@ app.post('/auctions', async (req: Request, res: Response) => {
     console.error('Error scheduling auction', err);
     res.status(502).json({ error: 'Unable to schedule auction with Facebook' });
   }
+});
+
+app.get('/events', (req: Request, res: Response) => {
+  // CORS is already applied globally; just set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  // initial comment to open stream
+  res.write(': connected\n\n');
+
+  // keepalive pings
+  const interval = setInterval(() => {
+    try {
+      res.write(`event: ping\n`);
+      res.write(`data: {"ts": ${Date.now()}}\n\n`);
+    } catch {
+      clearInterval(interval);
+    }
+  }, 25000);
+
+  // track client
+  sseClients.add(res);
+
+  req.on('close', () => {
+    clearInterval(interval);
+    sseClients.delete(res);
+    try { res.end(); } catch {}
+  });
 });
 
 server.listen(port, () => {

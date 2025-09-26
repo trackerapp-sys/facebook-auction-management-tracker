@@ -11,6 +11,7 @@ import './App.css';
 
 const WELCOME_ACK_KEY = 'auction-tracker-welcome';
 const WEBSOCKET_URL = (import.meta.env.VITE_WEBSOCKET_URL as string) || 'wss://facebook-auction-api.onrender.com';
+const SSE_URL = (import.meta.env.VITE_SSE_URL as string) || 'https://facebook-auction-api.onrender.com/events';
 
 const splitDateTime = (value?: string): { date?: string; time?: string } => {
   if (!value) {
@@ -44,56 +45,74 @@ function AppShell() {
 
   useEffect(() => {
     let ws: WebSocket | null = null;
-    let attempt = 0;
+    let wsAttempt = 0;
     let closed = false;
-    let timer: number | undefined;
+    let wsTimer: number | undefined;
+    let sse: EventSource | null = null;
 
-    const connect = () => {
+    const handleMessage = (raw: string) => {
+      try {
+        const data = JSON.parse(raw);
+        console.log('Realtime message received:', data);
+
+        if (data.object === 'page' && data.entry) {
+          for (const entry of data.entry) {
+            for (const change of entry.changes) {
+              if (change.field === 'feed' && change.value.item === 'comment') {
+                const { post_id, from, message } = change.value;
+                const auctionId = post_id;
+                const leadingBidder = from.name;
+                
+                // Simple bid parsing: extract the first number from the message
+                const bidMatch = message.match(/\d+/);
+                if (bidMatch) {
+                  const currentBid = parseInt(bidMatch[0], 10);
+                  dispatch({ 
+                    type: 'update-auction', 
+                    payload: { id: auctionId, currentBid, leadingBidder } 
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error parsing realtime message:', error);
+      }
+    };
+
+    const connectSSE = () => {
+      if (closed) return;
+      sse = new EventSource(SSE_URL, { withCredentials: true } as EventSourceInit);
+      sse.onopen = () => console.log('Connected to SSE');
+      sse.onmessage = (ev) => handleMessage(ev.data);
+      sse.onerror = (ev) => {
+        console.error('SSE error, will retry automatically:', ev);
+      };
+    };
+
+    const connectWS = () => {
       if (closed) return;
       const url = `${WEBSOCKET_URL}${WEBSOCKET_URL.includes('?') ? '&' : '?'}t=${Date.now()}`;
       ws = new WebSocket(url);
 
       ws.onopen = () => {
-        attempt = 0;
+        wsAttempt = 0;
         console.log('Connected to WebSocket server');
       };
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('WebSocket message received:', data);
-
-          if (data.object === 'page' && data.entry) {
-            for (const entry of data.entry) {
-              for (const change of entry.changes) {
-                if (change.field === 'feed' && change.value.item === 'comment') {
-                  const { post_id, from, message } = change.value;
-                  const auctionId = post_id;
-                  const leadingBidder = from.name;
-                  
-                  // Simple bid parsing: extract the first number from the message
-                  const bidMatch = message.match(/\d+/);
-                  if (bidMatch) {
-                    const currentBid = parseInt(bidMatch[0], 10);
-                    dispatch({ 
-                      type: 'update-auction', 
-                      payload: { id: auctionId, currentBid, leadingBidder } 
-                    });
-                  }
-                }
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
-        }
-      };
+      ws.onmessage = (event) => handleMessage(event.data);
 
       ws.onclose = (ev) => {
         console.log('Disconnected from WebSocket server', ev.code, ev.reason);
         if (closed) return;
-        const delay = Math.min(30000, 1000 * Math.pow(2, attempt++));
-        timer = window.setTimeout(connect, delay);
+        if (wsAttempt < 3) {
+          const delay = Math.min(30000, 1000 * Math.pow(2, wsAttempt++));
+          wsTimer = window.setTimeout(connectWS, delay);
+        } else {
+          console.warn('WebSocket failed repeatedly, falling back to SSE');
+          connectSSE();
+        }
       };
 
       ws.onerror = (err) => {
@@ -101,12 +120,13 @@ function AppShell() {
       };
     };
 
-    connect();
+    connectWS();
 
     return () => {
       closed = true;
-      if (timer) window.clearTimeout(timer);
+      if (wsTimer) window.clearTimeout(wsTimer);
       if (ws) ws.close();
+      if (sse) sse.close();
     };
   }, [dispatch]);
 
