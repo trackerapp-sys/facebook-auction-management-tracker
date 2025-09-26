@@ -1,7 +1,6 @@
-import type { FacebookAuthState, FacebookGroup } from '../state';
 type LoginScreenProps = {
-    onAuthenticated: (auth: FacebookAuthState, groups: FacebookGroup[]) => void;
+    message?: string;
     error?: string | null;
 };
-declare const LoginScreen: ({ onAuthenticated, error }: LoginScreenProps) => import("react/jsx-runtime").JSX.Element;
+declare const LoginScreen: ({ message, error }: LoginScreenProps) => import("react/jsx-runtime").JSX.Element;
 export default LoginScreen;

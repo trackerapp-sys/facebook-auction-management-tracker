@@ -3,6 +3,8 @@ import type { AuctionDraft } from '../state';
 type DashboardOverviewProps = {
   currency: string;
   previousAuctions: AuctionDraft[];
+  onEditAuction: (auction: AuctionDraft) => void;
+  onDeleteAuction: (id: string) => void;
 };
 
 const formatDateTime = (value?: string) => {
@@ -26,7 +28,15 @@ const formatDateTime = (value?: string) => {
   }
 };
 
-const DashboardOverview = ({ currency, previousAuctions }: DashboardOverviewProps) => {
+const formatCurrency = (currency: string, value?: number) => {
+  if (value === undefined || Number.isNaN(value)) {
+    return `${currency} 0.00`;
+  }
+
+  return `${currency} ${value.toFixed(2)}`;
+};
+
+const DashboardOverview = ({ currency, previousAuctions, onEditAuction, onDeleteAuction }: DashboardOverviewProps) => {
   const activeAuctions = previousAuctions.filter((auction) => auction.status === 'scheduled' || auction.status === 'live');
   const completedAuctions = previousAuctions.filter((auction) => auction.status === 'closed');
 
@@ -69,10 +79,13 @@ const DashboardOverview = ({ currency, previousAuctions }: DashboardOverviewProp
                   <th>Status</th>
                   <th>Type</th>
                   <th>Item</th>
+                  <th>Current bid</th>
+                  <th>Bidder</th>
                   <th>Reserve</th>
                   <th>Starting</th>
                   <th>Start</th>
                   <th>End</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -86,14 +99,34 @@ const DashboardOverview = ({ currency, previousAuctions }: DashboardOverviewProp
                     </td>
                     <td>{auction.type === 'live' ? 'Live feed' : 'Post'}</td>
                     <td>{auction.itemName || '-'}</td>
-                    <td>
-                      {currency} {auction.reservePrice.toFixed(2)}
-                    </td>
-                    <td>
-                      {currency} {auction.startingPrice.toFixed(2)}
-                    </td>
+                    <td>{formatCurrency(currency, auction.currentBid ?? auction.startingPrice)}</td>
+                    <td>{auction.leadingBidder || '-'}</td>
+                    <td>{formatCurrency(currency, auction.reservePrice)}</td>
+                    <td>{formatCurrency(currency, auction.startingPrice)}</td>
                     <td>{formatDateTime(auction.startDateTime)}</td>
                     <td>{formatDateTime(auction.endDateTime)}</td>
+                    <td>
+                      <div className="table-actions">
+                        <button
+                          type="button"
+                          className="icon-button"
+                          onClick={() => onEditAuction(auction)}
+                          aria-label="Edit auction"
+                          title="Edit auction"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button danger"
+                          onClick={() => onDeleteAuction(auction.id)}
+                          aria-label="Delete auction"
+                          title="Delete auction"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

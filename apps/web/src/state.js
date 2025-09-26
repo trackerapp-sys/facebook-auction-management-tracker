@@ -1,23 +1,24 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import { createContext, useContext, useEffect, useReducer } from 'react';
-const STORAGE_KEY = 'facebook-auction-manager-state';
-const STATE_VERSION = 3;
+const STORAGE_KEY = 'auction-tracker-state';
+const STATE_VERSION = 4;
 const defaultAuctionDraft = {
     id: 'draft-1',
     type: 'post',
+    groupName: '',
     groupUrl: '',
     postUrl: '',
     itemName: '',
     description: '',
     reservePrice: 0,
     startingPrice: 0,
+    currentBid: 0,
+    leadingBidder: '',
     bidIncrement: 1,
     status: 'draft'
 };
 const initialState = {
     profile: null,
-    facebookAuth: { isAuthenticated: false },
-    groups: [],
     auctionDraft: defaultAuctionDraft,
     previousAuctions: []
 };
@@ -30,8 +31,6 @@ function hydrateState(raw) {
         ...initialState,
         ...parsed,
         profile: parsed.profile ?? initialState.profile,
-        facebookAuth: { ...initialState.facebookAuth, ...(parsed.facebookAuth ?? {}) },
-        groups: parsed.groups ?? initialState.groups,
         auctionDraft: { ...defaultAuctionDraft, ...(parsed.auctionDraft ?? {}) },
         previousAuctions: parsed.previousAuctions ?? initialState.previousAuctions
     };
@@ -70,15 +69,21 @@ function appStateReducer(state, action) {
                 ...state,
                 auctionDraft: { ...state.auctionDraft, ...action.payload }
             };
-        case 'set-facebook-auth':
-            return { ...state, facebookAuth: action.payload };
-        case 'set-facebook-groups':
-            return { ...state, groups: action.payload };
-        case 'add-auction':
+        case 'add-auction': {
+            const nextAuctions = [
+                action.payload,
+                ...state.previousAuctions.filter((auction) => auction.id !== action.payload.id)
+            ];
             return {
                 ...state,
-                previousAuctions: [action.payload, ...state.previousAuctions],
+                previousAuctions: nextAuctions,
                 auctionDraft: { ...defaultAuctionDraft, id: `draft-${Date.now()}` }
+            };
+        }
+        case 'delete-auction':
+            return {
+                ...state,
+                previousAuctions: state.previousAuctions.filter((auction) => auction.id !== action.payload)
             };
         default:
             return state;

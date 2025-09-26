@@ -1,16 +1,16 @@
-import { AuctionDraft, FacebookAuthState, FacebookGroup, UserProfile } from '../state';
+import type { AuctionDraft, UserProfile } from '../state';
+import type { SectionKey } from './Sidebar';
 export type AuctionViewMode = 'manage' | 'create-post' | 'create-live';
 type AuctionWorkspaceProps = {
     mode: AuctionViewMode;
     profile: UserProfile;
-    facebookAuth: FacebookAuthState;
-    groups: FacebookGroup[];
     draft: AuctionDraft;
     previousAuctions: AuctionDraft[];
     onUpdateDraft: (payload: Partial<AuctionDraft>) => void;
-    onAuth: (payload: FacebookAuthState) => void;
-    onGroups: (payload: FacebookGroup[]) => void;
     onSchedule: (payload: AuctionDraft) => void;
+    onDeleteAuction: (id: string) => void;
+    onEditAuction: (auction: AuctionDraft) => void;
+    onNavigate: (section: SectionKey) => void;
 };
-declare const AuctionWorkspace: ({ mode, profile, facebookAuth, groups, draft, previousAuctions, onUpdateDraft, onAuth, onGroups, onSchedule }: AuctionWorkspaceProps) => import("react/jsx-runtime").JSX.Element;
+declare const AuctionWorkspace: ({ mode, profile, draft, previousAuctions, onUpdateDraft, onSchedule, onDeleteAuction, onEditAuction, onNavigate }: AuctionWorkspaceProps) => import("react/jsx-runtime").JSX.Element;
 export default AuctionWorkspace;

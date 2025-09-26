@@ -833,3 +833,33 @@
   font-size: 24px;
   font-weight: 700;
 }
+
+.table-actions {
+  display: inline-flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+}
+
+.icon-button {
+  background: rgba(37, 99, 235, 0.12);
+  border: none;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.icon-button:hover {
+  background: rgba(37, 99, 235, 0.22);
+  transform: translateY(-1px);
+}
+
+.icon-button.danger {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.icon-button.danger:hover {
+  background: rgba(239, 68, 68, 0.22);
+}

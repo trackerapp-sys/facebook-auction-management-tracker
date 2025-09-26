@@ -1,25 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppStateProvider, useAppState } from './state';
-import type { FacebookAuthState, FacebookGroup } from './state';
+import type { AuctionDraft } from './state';
 import OnboardingWizard from './components/OnboardingWizard';
 import AuctionWorkspace, { type AuctionViewMode } from './components/AuctionWorkspace';
 import Sidebar, { type SectionKey } from './components/Sidebar';
-import LoginScreen from './components/LoginScreen';
 import DashboardOverview from './components/DashboardOverview';
 import WelcomeScreen from './components/WelcomeScreen';
-import { checkFacebookSession, fetchUserGroups } from './services';
 import './App.css';
 
 const WELCOME_ACK_KEY = 'facebook-auction-welcome-ack';
 
 function AppShell() {
   const {
-    state: { profile, facebookAuth, auctionDraft, groups, previousAuctions },
+    state: { profile, auctionDraft, previousAuctions },
     dispatch
   } = useAppState();
   const [activeSection, setActiveSection] = useState<SectionKey>('overview');
-  const [isBootstrapping, setIsBootstrapping] = useState(true);
-  const [startupError, setStartupError] = useState<string | null>(null);
   const [hasSeenWelcome, setHasSeenWelcome] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return true;
@@ -32,67 +28,6 @@ function AppShell() {
       window.localStorage.setItem(WELCOME_ACK_KEY, 'true');
     }
   }, [hasSeenWelcome]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const bootstrapSession = async () => {
-      try {
-        const session = await checkFacebookSession();
-        if (cancelled) {
-          return;
-        }
-
-        dispatch({ type: 'set-facebook-auth', payload: session });
-
-        if (session.isAuthenticated) {
-          try {
-            const fetchedGroups = await fetchUserGroups();
-            if (!cancelled) {
-              dispatch({ type: 'set-facebook-groups', payload: fetchedGroups });
-            }
-          } catch (groupError) {
-            if (!cancelled) {
-              console.warn('Unable to load Facebook groups during bootstrap', groupError);
-              setStartupError('Connected to Facebook, but failed to load your groups. Try reconnecting.');
-            }
-          }
-        } else {
-          dispatch({ type: 'set-facebook-groups', payload: [] });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.warn('Failed to verify Facebook session', error);
-          dispatch({ type: 'set-facebook-auth', payload: { isAuthenticated: false } });
-          dispatch({ type: 'set-facebook-groups', payload: [] });
-          setStartupError('Unable to verify Facebook session. Please login again.');
-        }
-      } finally {
-        if (!cancelled) {
-          setIsBootstrapping(false);
-        }
-      }
-    };
-
-    void bootstrapSession();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [dispatch]);
-
-  useEffect(() => {
-    if (activeSection === 'auctions/create-post' && auctionDraft.type !== 'post') {
-      dispatch({ type: 'update-auction-draft', payload: { type: 'post', intervalBetweenItems: undefined } });
-    }
-
-    if (activeSection === 'auctions/create-live' && auctionDraft.type !== 'live') {
-      dispatch({
-        type: 'update-auction-draft',
-        payload: { type: 'live', intervalBetweenItems: auctionDraft.intervalBetweenItems ?? 4 }
-      });
-    }
-  }, [activeSection, auctionDraft.type, auctionDraft.intervalBetweenItems, dispatch]);
 
   const sectionTitle = useMemo(() => {
     switch (activeSection) {
@@ -120,7 +55,7 @@ function AppShell() {
       case 'auctions/create-live':
         return 'Set up a sequenced live auction with pacing and bid controls.';
       case 'auctions/manage':
-        return 'Monitor Facebook connection, schedule auctions, and track progress.';
+        return 'Keep auctions organised, record bids, and stay on top of follow-ups.';
       case 'inventory':
         return 'Keep product listings up to date and ready to drop.';
       case 'analytics':
@@ -128,34 +63,13 @@ function AppShell() {
       case 'settings':
         return 'Adjust account preferences, payments, and notifications.';
       default:
-        return 'Monitor auctions, manage inventory, and keep your Facebook commerce pipeline organised.';
+        return 'Monitor auctions, manage inventory, and keep your commerce pipeline organised.';
     }
   }, [activeSection]);
 
   const handleWelcomeBegin = () => {
     setHasSeenWelcome(true);
   };
-
-  const handleAuthenticated = (authState: FacebookAuthState, fetchedGroups: FacebookGroup[]) => {
-    dispatch({ type: 'set-facebook-auth', payload: authState });
-    dispatch({ type: 'set-facebook-groups', payload: fetchedGroups });
-    setStartupError(null);
-  };
-
-  if (isBootstrapping) {
-    return (
-      <div className="auth-gate booting">
-        <div className="auth-panel loading">
-          <div className="auth-logo">FM</div>
-          <p>Preparing your workspace...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!facebookAuth.isAuthenticated) {
-    return <LoginScreen error={startupError} onAuthenticated={handleAuthenticated} />;
-  }
 
   if (!profile) {
     if (!hasSeenWelcome) {
@@ -174,9 +88,29 @@ function AppShell() {
     return 'manage';
   };
 
+  const handleSchedule = (auction: AuctionDraft) => {
+    dispatch({ type: 'add-auction', payload: auction });
+  };
+
+  const handleDeleteAuction = (id: string) => {
+    dispatch({ type: 'delete-auction', payload: id });
+  };
+
+  const handleEditAuction = (auction: AuctionDraft) => {
+    dispatch({ type: 'update-auction-draft', payload: { ...auction, status: 'draft' } });
+    setActiveSection(auction.type === 'live' ? 'auctions/create-live' : 'auctions/create-post');
+  };
+
   const renderActiveSection = () => {
     if (activeSection === 'overview') {
-      return <DashboardOverview currency={profile.currency} previousAuctions={previousAuctions} />;
+      return (
+        <DashboardOverview
+          currency={profile.currency}
+          previousAuctions={previousAuctions}
+          onEditAuction={handleEditAuction}
+          onDeleteAuction={handleDeleteAuction}
+        />
+      );
     }
 
     if (activeSection.startsWith('auctions')) {
@@ -184,14 +118,13 @@ function AppShell() {
         <AuctionWorkspace
           mode={resolveAuctionMode()}
           profile={profile}
-          facebookAuth={facebookAuth}
-          groups={groups}
           draft={auctionDraft}
           previousAuctions={previousAuctions}
           onUpdateDraft={(payload) => dispatch({ type: 'update-auction-draft', payload })}
-          onAuth={(payload) => dispatch({ type: 'set-facebook-auth', payload })}
-          onGroups={(payload) => dispatch({ type: 'set-facebook-groups', payload })}
-          onSchedule={(auction) => dispatch({ type: 'add-auction', payload: auction })}
+          onSchedule={handleSchedule}
+          onDeleteAuction={handleDeleteAuction}
+          onEditAuction={handleEditAuction}
+          onNavigate={setActiveSection}
         />
       );
     }

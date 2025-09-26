@@ -24,42 +24,34 @@ export interface UserProfile {
     inventory: InventoryItem[];
     paymentMethods: PaymentMethodConfig[];
 }
-export interface FacebookGroup {
-    id: string;
-    name: string;
-    memberCount: number;
-    privacy: 'public' | 'private';
-}
-export interface FacebookAuthState {
-    isAuthenticated: boolean;
-    userName?: string;
-    userId?: string;
-    expiresAt?: string;
-}
 export interface AuctionDraft {
     id: string;
     type: AuctionType;
-    groupId?: string;
+    groupName?: string;
     groupUrl?: string;
     postUrl?: string;
     itemName: string;
     description: string;
     reservePrice: number;
     startingPrice: number;
+    currentBid?: number;
+    leadingBidder?: string;
     bidIncrement: number;
-    autoCloseMinutes?: number;
-    intervalBetweenItems?: number;
     caratWeight?: number;
     gramWeight?: number;
+    startDate?: string;
+    startTime?: string;
+    endDate?: string;
+    endTime?: string;
     startDateTime?: string;
     endDateTime?: string;
     durationMinutes?: number;
+    autoCloseMinutes?: number;
+    intervalBetweenItems?: number;
     status: 'draft' | 'scheduled' | 'live' | 'closed';
 }
 export interface AppState {
     profile: UserProfile | null;
-    facebookAuth: FacebookAuthState;
-    groups: FacebookGroup[];
     auctionDraft: AuctionDraft;
     previousAuctions: AuctionDraft[];
 }
@@ -70,14 +62,11 @@ export type AppStateAction = {
     type: 'update-auction-draft';
     payload: Partial<AuctionDraft>;
 } | {
-    type: 'set-facebook-auth';
-    payload: FacebookAuthState;
-} | {
-    type: 'set-facebook-groups';
-    payload: FacebookGroup[];
-} | {
     type: 'add-auction';
     payload: AuctionDraft;
+} | {
+    type: 'delete-auction';
+    payload: string;
 };
 interface ProviderProps {
     children: ReactNode;
