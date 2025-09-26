@@ -1,17 +1,18 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   AuctionDraft,
   FacebookAuthState,
   FacebookGroup,
   UserProfile
 } from '../state';
-import {
-  fetchUserGroups,
-  loginWithFacebook,
-  scheduleAuction
-} from '../services';
+import { fetchUserGroups, loginWithFacebook, scheduleAuction } from '../services';
+
+const CARAT_TO_GRAM = 0.2;
+
+export type AuctionViewMode = 'manage' | 'create-post' | 'create-live';
 
 type AuctionWorkspaceProps = {
+  mode: AuctionViewMode;
   profile: UserProfile;
   facebookAuth: FacebookAuthState;
   groups: FacebookGroup[];
@@ -24,6 +25,7 @@ type AuctionWorkspaceProps = {
 };
 
 const AuctionWorkspace = ({
+  mode,
   profile,
   facebookAuth,
   groups,
@@ -39,6 +41,62 @@ const AuctionWorkspace = ({
   const [isScheduling, setIsScheduling] = useState(false);
   const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const isCreationMode = mode !== 'manage';
+  const creationHeading = useMemo(() => {
+    if (mode === 'create-live') {
+      return 'Live auction setup';
+    }
+
+    if (mode === 'create-post') {
+      return 'Post auction setup';
+    }
+
+    return 'Auction designer';
+  }, [mode]);
+
+  const scheduleCta = mode === 'create-live' ? 'Start live run' : 'Schedule post';
+  const canUseDropdown = facebookAuth.isAuthenticated && groups.length > 0;
+  const hasSelectedGroup = Boolean(draft.groupId && draft.groupId.trim() !== '');
+  const hasManualGroup = Boolean(draft.groupUrl && draft.groupUrl.trim() !== '');
+
+  const parseWeight = (raw: string): number | undefined => {
+    if (raw.trim() === '') {
+      return undefined;
+    }
+
+    const numeric = Number(raw);
+    return Number.isNaN(numeric) ? undefined : numeric;
+  };
+
+  const handleCaratChange = (raw: string) => {
+    const carats = parseWeight(raw);
+    if (carats === undefined) {
+      onUpdateDraft({ caratWeight: undefined, gramWeight: undefined });
+      return;
+    }
+
+    const grams = Number((carats * CARAT_TO_GRAM).toFixed(3));
+    onUpdateDraft({ caratWeight: carats, gramWeight: grams });
+  };
+
+  const handleGramChange = (raw: string) => {
+    const grams = parseWeight(raw);
+    if (grams === undefined) {
+      onUpdateDraft({ gramWeight: undefined, caratWeight: undefined });
+      return;
+    }
+
+    const carats = Number((grams / CARAT_TO_GRAM).toFixed(3));
+    onUpdateDraft({ gramWeight: grams, caratWeight: carats });
+  };
+
+  const disableSchedule =
+    !isCreationMode ||
+    isScheduling ||
+    !facebookAuth.isAuthenticated ||
+    !draft.itemName.trim() ||
+    !(hasSelectedGroup || hasManualGroup);
 
   const handleFacebookLogin = async () => {
     setIsAuthenticating(true);
@@ -80,6 +138,15 @@ const AuctionWorkspace = ({
     }
   };
 
+  const handleGroupSelect = (value: string) => {
+    if (!value) {
+      onUpdateDraft({ groupId: undefined });
+      return;
+    }
+
+    onUpdateDraft({ groupId: value });
+  };
+
   const handleSchedule = async () => {
     setIsScheduling(true);
     setScheduleMessage(null);
@@ -101,11 +168,56 @@ const AuctionWorkspace = ({
     }
   };
 
-  const disableSchedule =
-    !facebookAuth.isAuthenticated || !draft.groupId || !draft.itemName.trim() || isScheduling;
+  const renderPreviousAuctions = () => {
+    if (previousAuctions.length === 0) {
+      return (
+        <div className="empty-state">
+          <h3>No auctions yet</h3>
+          <p>Launch your first auction to view bid velocity, top bidders, and payout status.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="table-wrapper">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Status</th>
+              <th>Type</th>
+              <th>Item</th>
+              <th>Reserve</th>
+              <th>Starting</th>
+            </tr>
+          </thead>
+          <tbody>
+            {previousAuctions.map((auction) => (
+              <tr key={auction.id}>
+                <td>{auction.id}</td>
+                <td>
+                  <span className={`status-chip ${auction.status}`}>
+                    {auction.status.charAt(0).toUpperCase() + auction.status.slice(1)}
+                  </span>
+                </td>
+                <td>{auction.type === 'live' ? 'Live feed' : 'Post'}</td>
+                <td>{auction.itemName || '-'}</td>
+                <td>
+                  {profile.currency} {auction.reservePrice.toFixed(2)}
+                </td>
+                <td>
+                  {profile.currency} {auction.startingPrice.toFixed(2)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   return (
-    <div className="content-section">
+    <div className="workspace-columns">
       <section className="panel-card">
         <div className="panel-header">
           <h2>Facebook connection</h2>
@@ -131,7 +243,7 @@ const AuctionWorkspace = ({
                 <svg viewBox="0 0 24 24" fill="currentColor" role="img" aria-hidden>
                   <path d="M13.5 22V12.75H16.5L17 9H13.5V7C13.5 5.97 13.75 5.25 15.23 5.25H17V2.14C16.12 2.04 15.23 2 14.35 2C11.64 2 9.75 3.66 9.75 6.7V9H7V12.75H9.75V22H13.5Z" />
                 </svg>
-                {isAuthenticating ? 'Reconnecting...' : 'Reconnect Facebook'}
+                {isAuthenticating ? 'Reconnecting...' : 'Login with Facebook'}
               </button>
               <button
                 type="button"
@@ -149,9 +261,12 @@ const AuctionWorkspace = ({
               {isFetchingGroups ? (
                 <p className="helper-text">Fetching your moderated group list.</p>
               ) : groups.length === 0 ? (
-                <div className="empty-state">
-                  <h3>No groups loaded yet</h3>
-                  <p>Refresh groups once you have admin permissions for your target Facebook communities.</p>
+                <div className="empty-state compact">
+                  <h3>No groups detected</h3>
+                  <p>
+                    Facebook requires additional review before we can load your groups automatically. Enter the
+                    group URL manually when creating an auction.
+                  </p>
                 </div>
               ) : (
                 <div className="metric-pills">
@@ -169,231 +284,260 @@ const AuctionWorkspace = ({
         </div>
       </section>
 
-      <section className="panel-card">
-        <div className="panel-header">
-          <h2>Auction designer</h2>
-          <span>Craft a high-performing drop</span>
-        </div>
-        <div className="form-grid">
-          <div>
-            <label className="field-label">Auction type</label>
-            <div className="tab-switcher">
-              <button
-                type="button"
-                className={draft.type === 'post' ? 'active' : ''}
-                onClick={() => onUpdateDraft({ type: 'post', intervalBetweenItems: undefined })}
-              >
-                Individual post
-              </button>
-              <button
-                type="button"
-                className={draft.type === 'live' ? 'active' : ''}
-                onClick={() => onUpdateDraft({ type: 'live', intervalBetweenItems: draft.intervalBetweenItems ?? 4 })}
-              >
-                Live feed
-              </button>
-            </div>
-            <p className="helper-text">
-              {draft.type === 'post'
-                ? 'We will schedule a single post with bidding monitored via comments.'
-                : 'Stream multiple items in sequence. Bids are tracked in real time from live comments.'}
-            </p>
+      {isCreationMode ? (
+        <section className="panel-card">
+          <div className="panel-header">
+            <h2>{creationHeading}</h2>
+            <span>Provide auction details and schedule your next drop</span>
           </div>
-          <div className="form-grid two-columns">
-            <div>
-              <label className="field-label" htmlFor="groupSelect">
-                Facebook group
-              </label>
-              <select
-                id="groupSelect"
-                value={draft.groupId ?? ''}
-                onChange={(event) => onUpdateDraft({ groupId: event.target.value })}
-                disabled={!facebookAuth.isAuthenticated || isFetchingGroups}
-              >
-                <option value="">Select a group</option>
-                {groups.map((group) => (
-                  <option key={group.id} value={group.id}>
-                    {group.name} - {group.memberCount.toLocaleString()} members
-                  </option>
-                ))}
-              </select>
-              {!facebookAuth.isAuthenticated && (
-                <p className="helper-text">Reconnect Facebook to load the groups you manage.</p>
-              )}
-            </div>
-            <div>
-              <label className="field-label" htmlFor="itemNameDraft">
-                Item name
-              </label>
-              <input
-                id="itemNameDraft"
-                value={draft.itemName}
-                onChange={(event) => onUpdateDraft({ itemName: event.target.value })}
-                placeholder="e.g. Premium Mystery Box"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="field-label" htmlFor="description">
-              Description
-            </label>
-            <textarea
-              id="description"
-              rows={3}
-              value={draft.description}
-              onChange={(event) => onUpdateDraft({ description: event.target.value })}
-              placeholder="Share item specifics, shipping info, and bidding rules."
-            />
-          </div>
-          <div className="form-grid two-columns">
-            <div>
-              <label className="field-label" htmlFor="reserve">
-                Reserve price ({profile.currency})
-              </label>
-              <input
-                id="reserve"
-                type="number"
-                min={0}
-                value={draft.reservePrice}
-                onChange={(event) => onUpdateDraft({ reservePrice: Number(event.target.value) })}
-              />
-            </div>
-            <div>
-              <label className="field-label" htmlFor="starting">
-                Starting price ({profile.currency})
-              </label>
-              <input
-                id="starting"
-                type="number"
-                min={0}
-                value={draft.startingPrice}
-                onChange={(event) => onUpdateDraft({ startingPrice: Number(event.target.value) })}
-              />
-              <p className="helper-text">
-                Kick off below reserve to spark a bidding war, or match reserve for straight-forward sales.
-              </p>
-            </div>
-          </div>
-          <div className="form-grid two-columns">
-            <div>
-              <label className="field-label" htmlFor="bidIncrement">
-                Bid increment ({profile.currency})
-              </label>
-              <input
-                id="bidIncrement"
-                type="number"
-                min={1}
-                value={draft.bidIncrement}
-                onChange={(event) => onUpdateDraft({ bidIncrement: Number(event.target.value) })}
-              />
-            </div>
-            <div>
-              <label className="field-label" htmlFor="autoClose">
-                Auto close after (minutes)
-              </label>
-              <input
-                id="autoClose"
-                type="number"
-                min={5}
-                value={draft.autoCloseMinutes ?? 60}
-                onChange={(event) => onUpdateDraft({ autoCloseMinutes: Number(event.target.value) })}
-              />
-            </div>
-          </div>
-          {draft.type === 'live' && (
+          <div className="form-grid">
             <div className="form-grid two-columns">
               <div>
-                <label className="field-label" htmlFor="interval">
-                  Interval between items (minutes)
+                <label className="field-label" htmlFor="groupSelect">
+                  Facebook group
                 </label>
-                <input
-                  id="interval"
-                  type="number"
-                  min={1}
-                  value={draft.intervalBetweenItems ?? 4}
-                  onChange={(event) =>
-                    onUpdateDraft({ intervalBetweenItems: Number(event.target.value) })
-                  }
-                />
+                {canUseDropdown ? (
+                  <select
+                    id="groupSelect"
+                    value={draft.groupId ?? ''}
+                    onChange={(event) => handleGroupSelect(event.target.value)}
+                    disabled={!facebookAuth.isAuthenticated || isFetchingGroups}
+                  >
+                    <option value="">Select a group</option>
+                    {groups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name} - {group.memberCount.toLocaleString()} members
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="manual-group-entry">
+                    <input
+                      id="groupUrl"
+                      type="url"
+                      placeholder="https://www.facebook.com/groups/..."
+                      value={draft.groupUrl ?? ''}
+                      onChange={(event) => onUpdateDraft({ groupUrl: event.target.value, groupId: undefined })}
+                    />
+                  </div>
+                )}
                 <p className="helper-text">
-                  Determines pacing of your live feed. We will prompt you when it is time to switch items.
+                  {canUseDropdown
+                    ? 'Select the Facebook group that will host the auction.'
+                    : 'Paste the Facebook group URL so we can reference it in reminders and reporting.'}
                 </p>
               </div>
               <div>
-                <span className="badge-live">Live assistant enabled</span>
-                <p className="helper-text">
-                  Real-time comment polling keeps your leaderboard updated without refreshing Facebook.
-                </p>
+                <label className="field-label" htmlFor="itemNameDraft">
+                  Item name
+                </label>
+                <input
+                  id="itemNameDraft"
+                  value={draft.itemName}
+                  onChange={(event) => onUpdateDraft({ itemName: event.target.value })}
+                  placeholder="e.g. Premium Mystery Box"
+                />
               </div>
             </div>
-          )}
-          <div className="inline-actions">
             <div>
-              <p className="helper-text">
-                {disableSchedule
-                  ? 'Complete the fields above and ensure Facebook is connected to enable scheduling.'
-                  : 'Ready to launch. We will publish through your connected Facebook session.'}
-              </p>
+              <label className="field-label" htmlFor="description">
+                Description
+              </label>
+              <textarea
+                id="description"
+                rows={3}
+                value={draft.description}
+                onChange={(event) => onUpdateDraft({ description: event.target.value })}
+                placeholder="Share item specifics, shipping info, and bidding rules."
+              />
             </div>
-            <button
-              type="button"
-              className="primary-action"
-              onClick={handleSchedule}
-              disabled={disableSchedule}
-            >
-              {isScheduling ? 'Scheduling...' : draft.type === 'live' ? 'Start live run' : 'Schedule post'}
-            </button>
+            <div className="form-grid two-columns">
+              <div>
+                <label className="field-label" htmlFor="reserve">
+                  Reserve price ({profile.currency})
+                </label>
+                <input
+                  id="reserve"
+                  type="number"
+                  min={0}
+                  value={draft.reservePrice}
+                  onChange={(event) => onUpdateDraft({ reservePrice: Number(event.target.value) })}
+                />
+              </div>
+              <div>
+                <label className="field-label" htmlFor="starting">
+                  Starting price ({profile.currency})
+                </label>
+                <input
+                  id="starting"
+                  type="number"
+                  min={0}
+                  value={draft.startingPrice}
+                  onChange={(event) => onUpdateDraft({ startingPrice: Number(event.target.value) })}
+                />
+              </div>
+            </div>
+            <div className="form-grid two-columns">
+              <div>
+                <label className="field-label" htmlFor="caratWeight">
+                  Carat weight
+                </label>
+                <input
+                  id="caratWeight"
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={draft.caratWeight ?? ''}
+                  onChange={(event) => handleCaratChange(event.target.value)}
+                  placeholder="e.g. 2.5"
+                />
+                <p className="helper-text">Automatically converts to grams for shipping notes.</p>
+              </div>
+              <div>
+                <label className="field-label" htmlFor="gramWeight">
+                  Gram weight
+                </label>
+                <input
+                  id="gramWeight"
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={draft.gramWeight ?? ''}
+                  onChange={(event) => handleGramChange(event.target.value)}
+                  placeholder="e.g. 0.5"
+                />
+                <p className="helper-text">Adjust either value and we will keep them in sync.</p>
+              </div>
+            </div>
+            {mode === 'create-post' && (
+              <div className="form-grid three-columns">
+                <div>
+                  <label className="field-label" htmlFor="startDateTime">
+                    Start time
+                  </label>
+                  <input
+                    id="startDateTime"
+                    type="datetime-local"
+                    value={draft.startDateTime ?? ''}
+                    onChange={(event) => onUpdateDraft({ startDateTime: event.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="field-label" htmlFor="endDateTime">
+                    End time
+                  </label>
+                  <input
+                    id="endDateTime"
+                    type="datetime-local"
+                    value={draft.endDateTime ?? ''}
+                    onChange={(event) => onUpdateDraft({ endDateTime: event.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="field-label" htmlFor="durationMinutes">
+                    Duration (minutes)
+                  </label>
+                  <input
+                    id="durationMinutes"
+                    type="number"
+                    min={1}
+                    value={draft.durationMinutes ?? ''}
+                    onChange={(event) => onUpdateDraft({ durationMinutes: Number(event.target.value) })}
+                    placeholder="e.g. 60"
+                  />
+                </div>
+              </div>
+            )}
+            <div className="form-grid two-columns">
+              <div>
+                <label className="field-label" htmlFor="bidIncrement">
+                  Bid increment ({profile.currency})
+                </label>
+                <input
+                  id="bidIncrement"
+                  type="number"
+                  min={1}
+                  value={draft.bidIncrement}
+                  onChange={(event) => onUpdateDraft({ bidIncrement: Number(event.target.value) })}
+                />
+              </div>
+              {mode === 'create-live' ? (
+                <>
+                  <div>
+                    <label className="field-label" htmlFor="interval">
+                      Interval between items (minutes)
+                    </label>
+                    <input
+                      id="interval"
+                      type="number"
+                      min={1}
+                      value={draft.intervalBetweenItems ?? 4}
+                      onChange={(event) =>
+                        onUpdateDraft({ intervalBetweenItems: Number(event.target.value) })
+                      }
+                    />
+                    <p className="helper-text">Determines pacing of your live feed sequence.</p>
+                  </div>
+                  <div>
+                    <label className="field-label" htmlFor="autoClose">
+                      Auto close after (minutes)
+                    </label>
+                    <input
+                      id="autoClose"
+                      type="number"
+                      min={5}
+                      value={draft.autoCloseMinutes ?? 60}
+                      onChange={(event) => onUpdateDraft({ autoCloseMinutes: Number(event.target.value) })}
+                    />
+                    <p className="helper-text">We will close the live item automatically after this window.</p>
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <label className="field-label" htmlFor="postUrl">
+                    Facebook post URL (optional)
+                  </label>
+                  <input
+                    id="postUrl"
+                    type="url"
+                    placeholder="https://www.facebook.com/groups/.../posts/..."
+                    value={draft.postUrl ?? ''}
+                    onChange={(event) => onUpdateDraft({ postUrl: event.target.value })}
+                  />
+                  <p className="helper-text">
+                    Paste the post URL after publishing so we can track bids and reminders.
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="inline-actions">
+              <div>
+                <p className="helper-text">
+                  {disableSchedule
+                    ? 'Complete the fields above and ensure Facebook is connected to enable scheduling.'
+                    : 'Ready to launch. We will publish through your connected Facebook session.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="primary-action"
+                onClick={handleSchedule}
+                disabled={disableSchedule}
+              >
+                {isScheduling ? 'Scheduling...' : scheduleCta}
+              </button>
+            </div>
           </div>
-        </div>
-      </section>
-
-      <section className="panel-card">
-        <div className="panel-header">
-          <h2>Recent auctions</h2>
-          <span>Review performance and bidder engagement</span>
-        </div>
-        {previousAuctions.length === 0 ? (
-          <div className="empty-state">
-            <h3>No auctions yet</h3>
-            <p>Launch your first auction to view bid velocity, top bidders, and payout status.</p>
+        </section>
+      ) : (
+        <section className="panel-card">
+          <div className="panel-header">
+            <h2>Recent auctions</h2>
+            <span>Review performance and bidder engagement</span>
           </div>
-        ) : (
-          <div className="table-wrapper">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Type</th>
-                  <th>Item</th>
-                  <th>Reserve</th>
-                  <th>Starting</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {previousAuctions.map((auction) => (
-                  <tr key={auction.id}>
-                    <td>{auction.id}</td>
-                    <td>{auction.type === 'live' ? 'Live feed' : 'Post'}</td>
-                    <td>{auction.itemName || '-'}</td>
-                    <td>
-                      {profile.currency} {auction.reservePrice.toFixed(2)}
-                    </td>
-                    <td>
-                      {profile.currency} {auction.startingPrice.toFixed(2)}
-                    </td>
-                    <td>
-                      <span className={`status-chip ${auction.status}`}>
-                        {auction.status.charAt(0).toUpperCase() + auction.status.slice(1)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+          {renderPreviousAuctions()}
+        </section>
+      )}
     </div>
   );
 };

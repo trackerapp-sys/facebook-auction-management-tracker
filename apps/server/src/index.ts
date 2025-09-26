@@ -267,6 +267,7 @@ app.post('/auctions', async (req: Request, res: Response) => {
     itemName,
     description,
     groupId,
+    groupUrl,
     reservePrice,
     startingPrice,
     startDateTime,
@@ -274,12 +275,19 @@ app.post('/auctions', async (req: Request, res: Response) => {
     durationMinutes,
     caratWeight,
     gramWeight,
+    postUrl,
     autoCloseMinutes,
     intervalBetweenItems
   } = req.body as Record<string, unknown>;
 
-  if (!groupId || typeof groupId !== 'string') {
-    res.status(400).json({ error: 'groupId is required' });
+  const normalizedGroupId = typeof groupId === 'string' ? groupId.trim() : '';
+  const normalizedGroupUrl = typeof groupUrl === 'string' ? groupUrl.trim() : '';
+  const normalizedPostUrl = typeof postUrl === 'string' ? postUrl.trim() : '';
+  const hasGroupId = normalizedGroupId.length > 0;
+  const hasGroupUrl = normalizedGroupUrl.length > 0;
+
+  if (!hasGroupId && !hasGroupUrl) {
+    res.status(400).json({ error: 'Provide a Facebook group or group URL' });
     return;
   }
 
@@ -289,7 +297,7 @@ app.post('/auctions', async (req: Request, res: Response) => {
   }
 
   if (type !== 'post' && type !== 'live') {
-    res.status(400).json({ error: 'type must be "post" or "live"' });
+    res.status(400).json({ error: "type must be 'post' or 'live'" });
     return;
   }
 
@@ -317,7 +325,7 @@ app.post('/auctions', async (req: Request, res: Response) => {
     if (!Number.isNaN(numeric)) {
       return numeric.toFixed(2);
     }
-    return 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â';
+    return '--';
   };
 
   const parseNumber = (input: unknown): number | undefined => {
@@ -335,14 +343,35 @@ app.post('/auctions', async (req: Request, res: Response) => {
 
   try {
     if (type === 'post') {
-      const postUrl = new URL(`https://graph.facebook.com/v19.0/${groupId}/feed`);
-      const message = `${itemName}\nReserve: ${formatCurrencyField(reservePrice)}\nStarting: ${formatCurrencyField(startingPrice)}\n\n${safeDescription}`;
+      if (!hasGroupId) {
+        res.json({
+          auctionId: `manual-${Date.now()}`,
+          status: 'scheduled',
+          message:
+            'Facebook permissions do not allow automatic posting yet. Publish manually in Facebook and add the post URL for tracking.',
+          startDateTime,
+          endDateTime,
+          durationMinutes: parseNumber(durationMinutes),
+          caratWeight: parseNumber(caratWeight),
+          gramWeight: parseNumber(gramWeight),
+          groupUrl: hasGroupUrl ? normalizedGroupUrl : undefined,
+          postUrl: normalizedPostUrl || undefined
+        });
+        return;
+      }
+
+      const postRequestUrl = new URL(`https://graph.facebook.com/v19.0/${normalizedGroupId}/feed`);
+      const message = `${itemName}
+Reserve: ${formatCurrencyField(reservePrice)}
+Starting: ${formatCurrencyField(startingPrice)}
+
+${safeDescription}`;
 
       const body = new URLSearchParams();
       body.set('message', message);
       body.set('access_token', auth.accessToken);
 
-      const postResponse = await fetch(postUrl, {
+      const postResponse = await fetch(postRequestUrl, {
         method: 'POST',
         body
       });
@@ -353,6 +382,8 @@ app.post('/auctions', async (req: Request, res: Response) => {
         throw new Error(graphError?.message || 'Failed to publish post');
       }
 
+      const fallbackPostUrl = `https://www.facebook.com/groups/${normalizedGroupId}/posts/${postPayload.id}/`;
+
       res.json({
         auctionId: postPayload.id,
         status: 'scheduled',
@@ -362,7 +393,9 @@ app.post('/auctions', async (req: Request, res: Response) => {
         endDateTime,
         durationMinutes: parseNumber(durationMinutes),
         caratWeight: parseNumber(caratWeight),
-        gramWeight: parseNumber(gramWeight)
+        gramWeight: parseNumber(gramWeight),
+        groupUrl: hasGroupUrl ? normalizedGroupUrl : undefined,
+        postUrl: normalizedPostUrl || fallbackPostUrl
       });
       return;
     }
@@ -377,13 +410,16 @@ app.post('/auctions', async (req: Request, res: Response) => {
       autoCloseMinutes: liveAutoClose,
       intervalBetweenItems: liveInterval,
       caratWeight: parseNumber(caratWeight),
-      gramWeight: parseNumber(gramWeight)
+      gramWeight: parseNumber(gramWeight),
+      groupUrl: hasGroupUrl ? normalizedGroupUrl : undefined,
+      postUrl: normalizedPostUrl || undefined
     });
   } catch (err) {
     console.error('Error scheduling auction', err);
     res.status(502).json({ error: 'Unable to schedule auction with Facebook' });
   }
 });
+
 app.listen(port, () => {
   console.log(`API listening on port ${port}`);
   console.log(`Client origin: ${CLIENT_ORIGIN}`);

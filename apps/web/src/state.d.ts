@@ -40,6 +40,8 @@ export interface AuctionDraft {
     id: string;
     type: AuctionType;
     groupId?: string;
+    groupUrl?: string;
+    postUrl?: string;
     itemName: string;
     description: string;
     reservePrice: number;

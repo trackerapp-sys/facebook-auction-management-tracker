@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-type SectionKey = 'overview' | 'auctions' | 'inventory' | 'analytics' | 'settings';
+export type SectionKey = 'overview' | 'auctions/manage' | 'auctions/create-post' | 'auctions/create-live' | 'inventory' | 'analytics' | 'settings';
 type SidebarProps = {
     displayName: string;
     activeSection: SectionKey;

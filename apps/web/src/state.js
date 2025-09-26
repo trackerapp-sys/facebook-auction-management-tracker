@@ -1,10 +1,12 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import { createContext, useContext, useEffect, useReducer } from 'react';
 const STORAGE_KEY = 'facebook-auction-manager-state';
-const STATE_VERSION = 2;
+const STATE_VERSION = 3;
 const defaultAuctionDraft = {
     id: 'draft-1',
     type: 'post',
+    groupUrl: '',
+    postUrl: '',
     itemName: '',
     description: '',
     reservePrice: 0,

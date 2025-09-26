@@ -1,4 +1,4 @@
-﻿import { createContext, ReactNode, useContext, useEffect, useReducer } from 'react';
+import { createContext, ReactNode, useContext, useEffect, useReducer } from 'react';
 
 export type BusinessType = 'individual' | 'business';
 export type AuctionType = 'post' | 'live';
@@ -47,6 +47,8 @@ export interface AuctionDraft {
   id: string;
   type: AuctionType;
   groupId?: string;
+  groupUrl?: string;
+  postUrl?: string;
   itemName: string;
   description: string;
   reservePrice: number;
@@ -78,11 +80,13 @@ export type AppStateAction =
   | { type: 'add-auction'; payload: AuctionDraft };
 
 const STORAGE_KEY = 'facebook-auction-manager-state';
-const STATE_VERSION = 2;
+const STATE_VERSION = 3;
 
 const defaultAuctionDraft: AuctionDraft = {
   id: 'draft-1',
   type: 'post',
+  groupUrl: '',
+  postUrl: '',
   itemName: '',
   description: '',
   reservePrice: 0,

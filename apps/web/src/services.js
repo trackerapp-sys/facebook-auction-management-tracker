@@ -85,11 +85,18 @@ export async function scheduleAuction(draft) {
             itemName: draft.itemName,
             description: draft.description,
             groupId: draft.groupId,
+            groupUrl: draft.groupUrl,
             reservePrice: draft.reservePrice,
             startingPrice: draft.startingPrice,
+            startDateTime: draft.startDateTime,
+            endDateTime: draft.endDateTime,
+            durationMinutes: draft.durationMinutes,
             bidIncrement: draft.bidIncrement,
             autoCloseMinutes: draft.autoCloseMinutes,
-            intervalBetweenItems: draft.intervalBetweenItems
+            intervalBetweenItems: draft.intervalBetweenItems,
+            postUrl: draft.postUrl,
+            caratWeight: draft.caratWeight,
+            gramWeight: draft.gramWeight
         })
     });
 }

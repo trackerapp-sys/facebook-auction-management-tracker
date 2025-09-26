@@ -1,5 +1,7 @@
 import { AuctionDraft, FacebookAuthState, FacebookGroup, UserProfile } from '../state';
+export type AuctionViewMode = 'manage' | 'create-post' | 'create-live';
 type AuctionWorkspaceProps = {
+    mode: AuctionViewMode;
     profile: UserProfile;
     facebookAuth: FacebookAuthState;
     groups: FacebookGroup[];
@@ -10,5 +12,5 @@ type AuctionWorkspaceProps = {
     onGroups: (payload: FacebookGroup[]) => void;
     onSchedule: (payload: AuctionDraft) => void;
 };
-declare const AuctionWorkspace: ({ profile, facebookAuth, groups, draft, previousAuctions, onUpdateDraft, onAuth, onGroups, onSchedule }: AuctionWorkspaceProps) => import("react/jsx-runtime").JSX.Element;
+declare const AuctionWorkspace: ({ mode, profile, facebookAuth, groups, draft, previousAuctions, onUpdateDraft, onAuth, onGroups, onSchedule }: AuctionWorkspaceProps) => import("react/jsx-runtime").JSX.Element;
 export default AuctionWorkspace;

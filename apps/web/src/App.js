@@ -5,13 +5,27 @@ import OnboardingWizard from './components/OnboardingWizard';
 import AuctionWorkspace from './components/AuctionWorkspace';
 import Sidebar from './components/Sidebar';
 import LoginScreen from './components/LoginScreen';
+import DashboardOverview from './components/DashboardOverview';
+import WelcomeScreen from './components/WelcomeScreen';
 import { checkFacebookSession, fetchUserGroups } from './services';
 import './App.css';
+const WELCOME_ACK_KEY = 'facebook-auction-welcome-ack';
 function AppShell() {
     const { state: { profile, facebookAuth, auctionDraft, groups, previousAuctions }, dispatch } = useAppState();
     const [activeSection, setActiveSection] = useState('overview');
     const [isBootstrapping, setIsBootstrapping] = useState(true);
     const [startupError, setStartupError] = useState(null);
+    const [hasSeenWelcome, setHasSeenWelcome] = useState(() => {
+        if (typeof window === 'undefined') {
+            return true;
+        }
+        return window.localStorage.getItem(WELCOME_ACK_KEY) === 'true';
+    });
+    useEffect(() => {
+        if (hasSeenWelcome && typeof window !== 'undefined') {
+            window.localStorage.setItem(WELCOME_ACK_KEY, 'true');
+        }
+    }, [hasSeenWelcome]);
     useEffect(() => {
         let cancelled = false;
         const bootstrapSession = async () => {
@@ -58,20 +72,56 @@ function AppShell() {
             cancelled = true;
         };
     }, [dispatch]);
+    useEffect(() => {
+        if (activeSection === 'auctions/create-post' && auctionDraft.type !== 'post') {
+            dispatch({ type: 'update-auction-draft', payload: { type: 'post', intervalBetweenItems: undefined } });
+        }
+        if (activeSection === 'auctions/create-live' && auctionDraft.type !== 'live') {
+            dispatch({
+                type: 'update-auction-draft',
+                payload: { type: 'live', intervalBetweenItems: auctionDraft.intervalBetweenItems ?? 4 }
+            });
+        }
+    }, [activeSection, auctionDraft.type, auctionDraft.intervalBetweenItems, dispatch]);
     const sectionTitle = useMemo(() => {
         switch (activeSection) {
+            case 'auctions/create-post':
+                return 'Create Post Auction';
+            case 'auctions/create-live':
+                return 'Create Live Auction';
+            case 'auctions/manage':
+                return 'Auction Control Center';
             case 'inventory':
                 return 'Inventory';
-            case 'settings':
-                return 'Settings';
             case 'analytics':
                 return 'Insights';
-            case 'auctions':
-                return 'Auction Control Center';
+            case 'settings':
+                return 'Settings';
             default:
                 return 'Dashboard Overview';
         }
     }, [activeSection]);
+    const headerSubtitle = useMemo(() => {
+        switch (activeSection) {
+            case 'auctions/create-post':
+                return 'Craft a single post auction ready to publish to your chosen group.';
+            case 'auctions/create-live':
+                return 'Set up a sequenced live auction with pacing and bid controls.';
+            case 'auctions/manage':
+                return 'Monitor Facebook connection, schedule auctions, and track progress.';
+            case 'inventory':
+                return 'Keep product listings up to date and ready to drop.';
+            case 'analytics':
+                return 'Review performance metrics and bidder engagement.';
+            case 'settings':
+                return 'Adjust account preferences, payments, and notifications.';
+            default:
+                return 'Monitor auctions, manage inventory, and keep your Facebook commerce pipeline organised.';
+        }
+    }, [activeSection]);
+    const handleWelcomeBegin = () => {
+        setHasSeenWelcome(true);
+    };
     const handleAuthenticated = (authState, fetchedGroups) => {
         dispatch({ type: 'set-facebook-auth', payload: authState });
         dispatch({ type: 'set-facebook-groups', payload: fetchedGroups });
@@ -84,9 +134,30 @@ function AppShell() {
         return _jsx(LoginScreen, { error: startupError, onAuthenticated: handleAuthenticated });
     }
     if (!profile) {
+        if (!hasSeenWelcome) {
+            return _jsx(WelcomeScreen, { onBegin: handleWelcomeBegin });
+        }
         return _jsx(OnboardingWizard, {});
     }
-    return (_jsxs("div", { className: "app-layout", children: [_jsx(Sidebar, { displayName: profile.displayName, activeSection: activeSection, onNavigate: setActiveSection }), _jsxs("main", { className: "main-area", children: [_jsxs("header", { className: "main-header", children: [_jsxs("div", { children: [_jsx("h1", { children: sectionTitle }), _jsx("p", { className: "header-subtitle", children: "Monitor auctions, manage inventory, and keep your Facebook commerce pipeline organised." })] }), _jsxs("div", { className: "session-panel", children: [_jsx("span", { className: "session-chip", children: profile.currency }), _jsx("span", { className: "session-chip", children: profile.timeZone }), _jsxs("span", { className: "session-chip", children: ["Bid interval: ", profile.bidMonitoringInterval, "m"] })] })] }), _jsx("section", { className: "content-section", children: _jsx(AuctionWorkspace, { profile: profile, facebookAuth: facebookAuth, groups: groups, draft: auctionDraft, previousAuctions: previousAuctions, onUpdateDraft: (payload) => dispatch({ type: 'update-auction-draft', payload }), onAuth: (payload) => dispatch({ type: 'set-facebook-auth', payload }), onGroups: (payload) => dispatch({ type: 'set-facebook-groups', payload }), onSchedule: (auction) => dispatch({ type: 'add-auction', payload: auction }) }) })] })] }));
+    const resolveAuctionMode = () => {
+        if (activeSection === 'auctions/create-post') {
+            return 'create-post';
+        }
+        if (activeSection === 'auctions/create-live') {
+            return 'create-live';
+        }
+        return 'manage';
+    };
+    const renderActiveSection = () => {
+        if (activeSection === 'overview') {
+            return _jsx(DashboardOverview, { currency: profile.currency, previousAuctions: previousAuctions });
+        }
+        if (activeSection.startsWith('auctions')) {
+            return (_jsx(AuctionWorkspace, { mode: resolveAuctionMode(), profile: profile, facebookAuth: facebookAuth, groups: groups, draft: auctionDraft, previousAuctions: previousAuctions, onUpdateDraft: (payload) => dispatch({ type: 'update-auction-draft', payload }), onAuth: (payload) => dispatch({ type: 'set-facebook-auth', payload }), onGroups: (payload) => dispatch({ type: 'set-facebook-groups', payload }), onSchedule: (auction) => dispatch({ type: 'add-auction', payload: auction }) }));
+        }
+        return (_jsx("div", { className: "panel-card", children: _jsxs("div", { className: "empty-state", children: [_jsx("h3", { children: "Coming soon" }), _jsx("p", { children: "We are still building this area of the control center." })] }) }));
+    };
+    return (_jsxs("div", { className: "app-layout", children: [_jsx(Sidebar, { displayName: profile.displayName, activeSection: activeSection, onNavigate: setActiveSection }), _jsxs("main", { className: "main-area", children: [_jsxs("header", { className: "main-header", children: [_jsxs("div", { children: [_jsx("h1", { children: sectionTitle }), _jsx("p", { className: "header-subtitle", children: headerSubtitle })] }), _jsxs("div", { className: "session-panel", children: [_jsx("span", { className: "session-chip", children: profile.currency }), _jsx("span", { className: "session-chip", children: profile.timeZone }), _jsxs("span", { className: "session-chip", children: ["Bid interval: ", profile.bidMonitoringInterval, "m"] })] })] }), _jsx("section", { className: "content-section", children: renderActiveSection() })] })] }));
 }
 function App() {
     return (_jsx(AppStateProvider, { children: _jsx(AppShell, {}) }));
