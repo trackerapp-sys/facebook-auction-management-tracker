@@ -141,6 +141,50 @@ app.post('/webhook/facebook', (req, res) => {
   res.sendStatus(200);
 });
 
+app.get('/auctions/:id', async (req: Request, res: Response) => {
+  const auth = req.session.facebookAuth;
+  if (!auth) {
+    res.status(401).json({ error: 'Not authenticated with Facebook' });
+    return;
+  }
+
+  const { id } = req.params;
+
+  try {
+    const graphUrl = new URL(`https://graph.facebook.com/v19.0/${id}/comments`);
+    graphUrl.searchParams.set('access_token', auth.accessToken);
+
+    const graphResponse = await fetch(graphUrl);
+    const graphPayload = await graphResponse.json();
+
+    if (!graphResponse.ok) {
+      const { error: graphError } = graphPayload as { error?: GraphError };
+      throw new Error(graphError?.message || 'Failed to load comments');
+    }
+
+    const { data } = graphPayload as { data: Array<{ from?: { name: string }; message: string }> };
+
+    let currentBid = 0;
+    let leadingBidder = '';
+
+    for (const comment of data) {
+      const bidMatch = comment.message.match(/\d+/);
+      if (bidMatch) {
+        const bid = parseInt(bidMatch[0], 10);
+        if (bid > currentBid) {
+          currentBid = bid;
+          leadingBidder = comment.from?.name || '';
+        }
+      }
+    }
+
+    res.json({ currentBid, leadingBidder });
+  } catch (err) {
+    console.error('Error fetching auction details', err);
+    res.status(502).json({ error: 'Unable to fetch auction details from Facebook' });
+  }
+});
+
 app.get('/auth/facebook/url', (req: Request, res: Response) => {
   if (!FACEBOOK_APP_ID) {
     res.status(500).json({ error: 'Facebook app ID not configured' });

@@ -17,3 +17,16 @@ export async function scheduleAuction(draft) {
 
   return response.json();
 }
+
+export async function fetchBids(auctionId) {
+  const response = await fetch(`${API_BASE_URL}/auctions/${auctionId}`, {
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || 'Failed to fetch bids');
+  }
+
+  return response.json();
+}

@@ -108,7 +108,7 @@ const DashboardOverview = ({
                     </td>
                     <td>{auction.type === 'live' ? 'Live feed' : 'Post'}</td>
                     <td>{auction.itemName || '-'}</td>
-                    <td>{formatCurrency(currency, auction.currentBid ?? auction.startingPrice)}</td>
+                    <td>{formatCurrency(currency, auction.currentBid ?? 0)}</td>
                     <td>{auction.leadingBidder || '-'}</td>
                     <td>{formatCurrency(currency, auction.reservePrice)}</td>
                     <td>{formatCurrency(currency, auction.startingPrice)}</td>
