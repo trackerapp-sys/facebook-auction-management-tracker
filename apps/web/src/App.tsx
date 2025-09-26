@@ -6,6 +6,7 @@ import AuctionWorkspace, { type AuctionViewMode } from './components/AuctionWork
 import Sidebar, { type SectionKey } from './components/Sidebar';
 import DashboardOverview from './components/DashboardOverview';
 import WelcomeScreen from './components/WelcomeScreen';
+import { fetchBids } from './services';
 import './App.css';
 
 const WELCOME_ACK_KEY = 'auction-tracker-welcome';
@@ -162,6 +163,16 @@ function AppShell() {
     setActiveSection(auction.type === 'live' ? 'auctions/create-live' : 'auctions/create-post');
   };
 
+  const handleFetchBids = async (auctionId: string) => {
+    try {
+      const bidData = await fetchBids(auctionId);
+      dispatch({ type: 'update-auction', payload: { id: auctionId, ...bidData } });
+    } catch (err) {
+      // In a real app, you'd want to show an error to the user
+      console.error('Failed to fetch bids:', err);
+    }
+  };
+
   if (!profile) {
     if (!hasSeenWelcome) {
       return <WelcomeScreen onBegin={handleWelcomeBegin} />;
@@ -188,6 +199,7 @@ function AppShell() {
           previousAuctions={previousAuctions}
           onEditAuction={handleEditAuction}
           onDeleteAuction={handleDeleteAuction}
+          onFetchBids={handleFetchBids}
         />
       );
     }

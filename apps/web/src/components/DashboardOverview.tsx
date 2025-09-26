@@ -6,6 +6,7 @@ type DashboardOverviewProps = {
   previousAuctions: AuctionDraft[];
   onEditAuction: (auction: AuctionDraft) => void;
   onDeleteAuction: (id: string) => void;
+  onFetchBids?: (id: string) => Promise<void>;
 };
 
 const formatCurrency = (currency: string, value?: number) => {
@@ -21,7 +22,8 @@ const DashboardOverview = ({
   timeZone,
   previousAuctions,
   onEditAuction,
-  onDeleteAuction
+  onDeleteAuction,
+  onFetchBids
 }: DashboardOverviewProps) => {
   const activeAuctions = previousAuctions.filter((auction) => auction.status === 'scheduled' || auction.status === 'live');
   const completedAuctions = previousAuctions.filter((auction) => auction.status === 'closed');
@@ -113,6 +115,15 @@ const DashboardOverview = ({
                     <td>{formatDateTime(auction.endDateTime)}</td>
                     <td>
                       <div className="table-actions">
+                        <button
+                          type="button"
+                          className="icon-button"
+                          onClick={() => onFetchBids?.(auction.id)}
+                          aria-label="Fetch latest bids"
+                          title="Fetch latest bids"
+                        >
+                          🔄
+                        </button>
                         <button
                           type="button"
                           className="icon-button"
