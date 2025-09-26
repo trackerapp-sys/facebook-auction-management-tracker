@@ -1,4 +1,4 @@
-'''import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AppStateProvider, useAppState } from './state';
 import type { AuctionDraft } from './state';
 import OnboardingWizard from './components/OnboardingWizard';
@@ -248,4 +248,3 @@ function App() {
 }
 
 export default App;
-'''
