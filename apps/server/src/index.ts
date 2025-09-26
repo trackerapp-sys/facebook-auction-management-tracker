@@ -4,6 +4,8 @@ import express from 'express';
 import session from 'express-session';
 import type { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
+import { WebSocketServer, WebSocket } from 'ws';
+import http from 'http';
 
 declare module 'express-session' {
   interface SessionData {
@@ -32,6 +34,16 @@ interface GraphError {
 }
 
 const app = express();
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
+wss.on('connection', (ws) => {
+  console.log('Client connected');
+  ws.on('close', () => {
+    console.log('Client disconnected');
+  });
+});
+
 const port = Number(process.env.PORT) || 4000;
 
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
@@ -100,6 +112,33 @@ app.use(
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/webhook/facebook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode === 'subscribe' && token === process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN) {
+    console.log('Webhook verified');
+    res.status(200).send(challenge);
+  } else {
+    console.error('Failed validation. Make sure the validation tokens match.');
+    res.sendStatus(403);
+  }
+});
+
+app.post('/webhook/facebook', (req, res) => {
+  console.log('Facebook webhook event received:', JSON.stringify(req.body, null, 2));
+
+  // Broadcast the event to all connected clients
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(req.body));
+    }
+  });
+
+  res.sendStatus(200);
 });
 
 app.get('/auth/facebook/url', (req: Request, res: Response) => {
@@ -361,11 +400,7 @@ app.post('/auctions', async (req: Request, res: Response) => {
       }
 
       const postRequestUrl = new URL(`https://graph.facebook.com/v19.0/${normalizedGroupId}/feed`);
-      const message = `${itemName}
-Reserve: ${formatCurrencyField(reservePrice)}
-Starting: ${formatCurrencyField(startingPrice)}
-
-${safeDescription}`;
+      const message = `${itemName}\nReserve: ${formatCurrencyField(reservePrice)}\nStarting: ${formatCurrencyField(startingPrice)}\n\n${safeDescription}`;
 
       const body = new URLSearchParams();
       body.set('message', message);
@@ -420,7 +455,7 @@ ${safeDescription}`;
   }
 });
 
-app.listen(port, () => {
+server.listen(port, () => {
   console.log(`API listening on port ${port}`);
   console.log(`Client origin: ${CLIENT_ORIGIN}`);
   console.log(`Facebook redirect URI: ${FACEBOOK_REDIRECT_URI}`);
