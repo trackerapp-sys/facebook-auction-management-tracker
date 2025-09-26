@@ -6,7 +6,7 @@ import AuctionWorkspace, { type AuctionViewMode } from './components/AuctionWork
 import Sidebar, { type SectionKey } from './components/Sidebar';
 import DashboardOverview from './components/DashboardOverview';
 import WelcomeScreen from './components/WelcomeScreen';
-import { fetchBids } from './api';
+import { fetchBids, fetchBidsByUrl } from './api';
 import './App.css';
 
 const WELCOME_ACK_KEY = 'auction-tracker-welcome';
@@ -187,48 +187,27 @@ function AppShell() {
   const handleFetchBids = async (auctionId: string) => {
     const isGraphId = (id: string) => /^\d+(_\d+)?$/.test(id);
 
-    const extractGraphPostId = (url?: string): string | null => {
-      if (!url) return null;
-      try {
-        const u = new URL(url);
-        const parts = u.pathname.split('/').filter(Boolean);
-
-        // Match /groups/{groupId}/posts/{postId}
-        const groupsIdx = parts.indexOf('groups');
-        const postsIdx = parts.indexOf('posts');
-        if (groupsIdx !== -1 && postsIdx !== -1 && parts[groupsIdx + 1] && parts[postsIdx + 1]) {
-          const groupId = parts[groupsIdx + 1];
-          const postId = parts[postsIdx + 1];
-          if (/^\d+$/.test(groupId) && /^\d+$/.test(postId)) {
-            return `${groupId}_${postId}`;
-          }
-        }
-
-        // Match permalink/{postId} or posts/{postId}
-        const permalinkIdx = parts.indexOf('permalink');
-        if (permalinkIdx !== -1 && parts[permalinkIdx + 1] && /^\d+$/.test(parts[permalinkIdx + 1])) {
-          return parts[permalinkIdx + 1];
-        }
-        if (postsIdx !== -1 && parts[postsIdx + 1] && /^\d+$/.test(parts[postsIdx + 1])) {
-          return parts[postsIdx + 1];
-        }
-      } catch {
-        // ignore parse errors
-      }
-      return null;
-    };
-
     try {
       const auction = previousAuctions.find(a => a.id === auctionId);
-      const derivedId = isGraphId(auctionId) ? auctionId : extractGraphPostId(auction?.postUrl);
-      if (!derivedId) {
-        console.error('Cannot fetch bids: provide a valid Facebook post URL or Graph post ID for this auction.');
+      if (!auction) {
+        console.error('Cannot fetch bids: unknown auction');
         return;
       }
 
-      const bidData = await fetchBids(derivedId);
-      // Keep the local auction id but update with fetched data
-      dispatch({ type: 'update-auction', payload: { id: auctionId, ...bidData } });
+      // Prefer fetching by URL for private group posts or when the app ID is insufficient
+      if (auction.postUrl) {
+        const bidData = await fetchBidsByUrl(auction.postUrl);
+        dispatch({ type: 'update-auction', payload: { id: auctionId, ...bidData } });
+        return;
+      }
+
+      if (isGraphId(auctionId)) {
+        const bidData = await fetchBids(auctionId);
+        dispatch({ type: 'update-auction', payload: { id: auctionId, ...bidData } });
+        return;
+      }
+
+      console.error('Cannot fetch bids: provide a valid Facebook post URL or Graph post ID for this auction.');
     } catch (err) {
       console.error('Failed to fetch bids:', err);
     }

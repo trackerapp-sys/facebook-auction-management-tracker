@@ -33,6 +33,36 @@ interface GraphError {
   error_subcode?: number;
 }
 
+function extractGraphPostIdFromUrl(urlString: string): string | null {
+  try {
+    const u = new URL(urlString);
+    const parts = u.pathname.split('/').filter(Boolean);
+
+    // Match /groups/{groupId}/posts/{postId}
+    const groupsIdx = parts.indexOf('groups');
+    const postsIdx = parts.indexOf('posts');
+    if (groupsIdx !== -1 && postsIdx !== -1 && parts[groupsIdx + 1] && parts[postsIdx + 1]) {
+      const groupId = parts[groupsIdx + 1];
+      const postId = parts[postsIdx + 1];
+      if (/^\d+$/.test(groupId) && /^\d+$/.test(postId)) {
+        return `${groupId}_${postId}`;
+      }
+    }
+
+    // Match permalink/{postId} or posts/{postId}
+    const permalinkIdx = parts.indexOf('permalink');
+    if (permalinkIdx !== -1 && parts[permalinkIdx + 1] && /^\d+$/.test(parts[permalinkIdx + 1])) {
+      return parts[permalinkIdx + 1];
+    }
+    if (postsIdx !== -1 && parts[postsIdx + 1] && /^\d+$/.test(parts[postsIdx + 1])) {
+      return parts[postsIdx + 1];
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return null;
+}
+
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -154,17 +184,88 @@ app.get('/auctions/:id', async (req: Request, res: Response) => {
     return;
   }
   const appAccessToken = `${FACEBOOK_APP_ID}|${FACEBOOK_APP_SECRET}`;
+  const auth = req.session.facebookAuth;
+  const accessToken = auth?.accessToken || appAccessToken;
 
   try {
     const graphUrl = new URL(`https://graph.facebook.com/v19.0/${id}/comments`);
-    graphUrl.searchParams.set('access_token', appAccessToken);
+    graphUrl.searchParams.set('access_token', accessToken);
 
     const graphResponse = await fetch(graphUrl);
     const graphPayload = await graphResponse.json();
 
     if (!graphResponse.ok) {
       const { error: graphError } = graphPayload as { error?: GraphError };
-      throw new Error(graphError?.message || 'Failed to load comments');
+      const message = graphError?.message || 'Failed to load comments';
+      console.error('Graph API error', { status: graphResponse.status, message, details: graphError });
+      res.status(graphResponse.status).json({ error: message });
+      return;
+    }
+
+    const { data } = graphPayload as { data: Array<{ from?: { name: string }; message: string }> };
+
+    let currentBid = 0;
+    let leadingBidder = '';
+
+    for (const comment of data) {
+      const bidMatch = comment.message.match(/\d+/);
+      if (bidMatch) {
+        const bid = parseInt(bidMatch[0], 10);
+        if (bid > currentBid) {
+          currentBid = bid;
+          leadingBidder = comment.from?.name || '';
+        }
+      }
+    }
+
+    res.json({ currentBid, leadingBidder });
+  } catch (err) {
+    console.error('Error fetching auction details', err);
+    res.status(502).json({ error: 'Unable to fetch auction details from Facebook' });
+  }
+});
+
+app.get('/auctions/by-url', async (req: Request, res: Response) => {
+  if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) {
+    res.status(500).json({ error: 'Facebook app credentials not configured' });
+    return;
+  }
+
+  const { url } = req.query as Record<string, string>;
+  if (!url) {
+    res.status(400).json({ error: 'Missing url parameter' });
+    return;
+  }
+
+  const id = extractGraphPostIdFromUrl(url);
+  if (!id) {
+    res.status(400).json({ error: 'Invalid Facebook post URL' });
+    return;
+  }
+
+  const isValidId = /^\d+(_\d+)?$/.test(id);
+  if (!isValidId) {
+    res.status(400).json({ error: 'Invalid derived post id' });
+    return;
+  }
+
+  const appAccessToken = `${FACEBOOK_APP_ID}|${FACEBOOK_APP_SECRET}`;
+  const auth = req.session.facebookAuth;
+  const accessToken = auth?.accessToken || appAccessToken;
+
+  try {
+    const graphUrl = new URL(`https://graph.facebook.com/v19.0/${id}/comments`);
+    graphUrl.searchParams.set('access_token', accessToken);
+
+    const graphResponse = await fetch(graphUrl);
+    const graphPayload = await graphResponse.json();
+
+    if (!graphResponse.ok) {
+      const { error: graphError } = graphPayload as { error?: GraphError };
+      const message = graphError?.message || 'Failed to load comments';
+      console.error('Graph API error', { status: graphResponse.status, message, details: graphError });
+      res.status(graphResponse.status).json({ error: message });
+      return;
     }
 
     const { data } = graphPayload as { data: Array<{ from?: { name: string }; message: string }> };
