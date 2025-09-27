@@ -49,7 +49,8 @@ function extractGraphPostIdFromUrl(urlString: string): string | null {
     // Matches group posts: /groups/{groupId}/posts/{postId}/ or /groups/{groupId}/permalink/{postId}/
     const groupPostMatch = path.match(/\/groups\/[^/]+\/(?:posts|permalink)\/(\d+)/);
     if (groupPostMatch && groupPostMatch[1]) {
-      return groupPostMatch[1];
+      const groupId = path.split('/')[2];
+      return `${groupId}_${groupPostMatch[1]}`;
     }
 
     // Matches user posts: /{username}/posts/{postId}
@@ -67,8 +68,9 @@ function extractGraphPostIdFromUrl(urlString: string): string | null {
 
     // Matches permalink URLs: /permalink.php?story_fbid={postId}&id={pageId}
     const storyFbidMatch = url.searchParams.get('story_fbid');
-    if (storyFbidMatch) {
-      return storyFbidMatch;
+    const pageId = url.searchParams.get('id');
+    if (storyFbidMatch && pageId) {
+      return `${pageId}_${storyFbidMatch}`;
     }
 
     return null;
@@ -187,6 +189,7 @@ const sessionParser = session({
   }
 });
 
+app.set('trust proxy', 1);
 app.use(
   cors({
     origin: (origin, callback) => {
