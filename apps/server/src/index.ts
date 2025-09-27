@@ -15,6 +15,13 @@ declare module 'express-session' {
   }
 }
 
+// Add this to handle the upgrade request
+declare module 'http' {
+  interface IncomingMessage {
+    session: session.Session & Partial<session.SessionData>;
+  }
+}
+
 interface FacebookUserProfile {
   id: string;
   name: string;
@@ -131,7 +138,7 @@ async function processBids(postId: string) {
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true }); // Use noServer to handle upgrades manually
 const sseClients = new Set<Response>();
 
 function broadcast(data: unknown) {
@@ -152,29 +159,44 @@ function broadcastSSE(data: unknown) {
 }
 
 wss.on('connection', (ws) => {
-  console.log('Client connected via WebSocket');
-  ws.on('message', (message) => {
-    console.log('received: %s', message);
-  });
-  ws.on('close', () => {
-    console.log('Client disconnected from WebSocket');
-  });
+  console.log('WebSocket client connected');
+  ws.on('close', () => console.log('WebSocket client disconnected'));
+  ws.on('error', (error) => console.error('WebSocket error:', error));
 });
 
-const port = process.env.PORT || 3000;
-const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
-const DEPLOYED_CLIENT_URL = 'https://facebook-auction-app.onrender.com';
+const port = Number(process.env.PORT) || 4000;
+
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
-const FACEBOOK_WEBHOOK_VERIFY_TOKEN = process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN;
+const INGEST_TOKEN = process.env.INGEST_TOKEN;
+const SERVER_BASE_URL = process.env.SERVER_BASE_URL || `http://localhost:${port}`;
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+const PAGE_TOKENS = new Map<string, string>();
+const CORS_ADDITIONAL_ORIGINS = (process.env.CORS_ADDITIONAL_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const DEFAULT_ALLOWED_ORIGINS = [
+  CLIENT_ORIGIN,
+  'https://facebook-auction-app.onrender.com',
+  'https://facebook-group-auction-tracker-app.onrender.com',
+  'https://www.facebook.com',
+  'https://facebook.com',
+  'https://m.facebook.com'
+];
+const ALLOWED_ORIGINS = new Set([...DEFAULT_ALLOWED_ORIGINS, ...CORS_ADDITIONAL_ORIGINS]);
+const FACEBOOK_REDIRECT_URI =
+  process.env.FACEBOOK_REDIRECT_URI || `${SERVER_BASE_URL}/auth/facebook/callback`;
 const FACEBOOK_OAUTH_SCOPES = (process.env.FACEBOOK_OAUTH_SCOPES ||
-  // Include Page permissions to enable webhooks for instant updates
   'public_profile,pages_show_list,pages_manage_metadata,pages_read_engagement'
 )
   .split(',')
   .map((scope) => scope.trim())
   .filter(Boolean);
-const SERVER_BASE_URL = process.env.SERVER_BASE_URL || `http://localhost:${port}`;
+
+if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) {
+  console.warn('Facebook app credentials missing. OAuth routes will return 500 until configured.');
+}
 
 const sessionParser = session({
   name: 'auction.sid',
@@ -198,7 +220,7 @@ app.use(
         return;
       }
 
-      if (CLIENT_URL === origin || DEPLOYED_CLIENT_URL === origin) {
+      if (ALLOWED_ORIGINS.has(origin)) {
         callback(null, true);
         return;
       }
@@ -209,7 +231,7 @@ app.use(
   })
 );
 app.use(express.json());
-app.use(sessionParser);
+app.use(sessionParser); // Use the session parser for HTTP requests
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -235,18 +257,24 @@ app.get('/webhook/facebook', (req, res) => {
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  if (mode === 'subscribe' && token === FACEBOOK_WEBHOOK_VERIFY_TOKEN) {
-    console.log('Facebook webhook verified');
+  if (mode === 'subscribe' && token === process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN) {
+    console.log('Webhook verified');
     res.status(200).send(challenge);
   } else {
-    console.error('Facebook webhook verification failed');
+    console.error('Failed validation. Make sure the validation tokens match.');
     res.sendStatus(403);
   }
 });
 
 app.post('/webhook/facebook', (req, res) => {
-  console.log('Received Facebook webhook:', JSON.stringify(req.body, null, 2));
-  broadcast(req.body);
+  console.log('Facebook webhook event received:', JSON.stringify(req.body, null, 2));
+
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(req.body));
+    }
+  });
+  broadcastSSE(req.body);
   res.sendStatus(200);
 });
 
@@ -254,10 +282,9 @@ app.get('/auth/facebook', (req, res) => {
   const state = randomUUID();
   req.session.oauthState = state;
 
-  const redirectUri = `${SERVER_BASE_URL}/auth/facebook/callback`;
   const authUrl = new URL('https://www.facebook.com/v19.0/dialog/oauth');
   authUrl.searchParams.set('client_id', FACEBOOK_APP_ID!);
-  authUrl.searchParams.set('redirect_uri', redirectUri);
+  authUrl.searchParams.set('redirect_uri', FACEBOOK_REDIRECT_URI);
   authUrl.searchParams.set('state', state);
   authUrl.searchParams.set('scope', FACEBOOK_OAUTH_SCOPES.join(','));
 
@@ -275,7 +302,7 @@ app.get('/auth/facebook/callback', async (req, res) => {
   const tokenUrl = new URL('https://graph.facebook.com/v19.0/oauth/access_token');
   tokenUrl.searchParams.set('client_id', FACEBOOK_APP_ID!);
   tokenUrl.searchParams.set('client_secret', FACEBOOK_APP_SECRET!);
-  tokenUrl.searchParams.set('redirect_uri', `${SERVER_BASE_URL}/auth/facebook/callback`);
+  tokenUrl.searchParams.set('redirect_uri', FACEBOOK_REDIRECT_URI);
   tokenUrl.searchParams.set('code', code as string);
 
   try {
@@ -306,7 +333,7 @@ app.get('/auth/facebook/callback', async (req, res) => {
       profile: profileData
     };
 
-    res.redirect(CLIENT_URL);
+    res.redirect(CLIENT_ORIGIN);
   } catch (error) {
     console.error('Error during Facebook OAuth callback:', error);
     res.status(500).send('Authentication failed');
@@ -344,6 +371,19 @@ app.get('/auctions/by-url', async (req: Request, res: Response) => {
     console.error('Error processing bids:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+// Handle WebSocket upgrades
+server.on('upgrade', (request, socket, head) => {
+  sessionParser(request, {} as any, () => {
+    if (request.session && request.session.facebookAuth) {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
 });
 
 server.listen(port, () => {
