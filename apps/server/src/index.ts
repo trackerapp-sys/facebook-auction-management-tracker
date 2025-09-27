@@ -175,3 +175,58 @@ app.get('/webhook/facebook', (req, res) => {
     res.sendStatus(403);
   }
 });
+
+app.post('/webhook/facebook', (req, res) => {
+  console.log('Facebook webhook event received:', JSON.stringify(req.body, null, 2));
+
+  // Broadcast the event to all connected clients (WebSocket)
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(req.body));
+    }
+  });
+
+  // Broadcast to SSE clients
+  broadcastSSE(req.body);
+
+  res.sendStatus(200);
+});
+
+app.get('/auctions/by-url', async (req: Request, res: Response) => {
+  if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) {
+    res.status(500).json({ error: 'Facebook app credentials not configured' });
+    return;
+  }
+
+  const { url } = req.query as Record<string, string>;
+  if (!url) {
+    res.status(400).json({ error: 'Missing url parameter' });
+    return;
+  }
+
+  const id = extractGraphPostIdFromUrl(url);
+  if (!id) {
+    res.status(400).json({ error: 'Invalid Facebook post URL' });
+    return;
+  }
+
+  const isValidId = /^\d+(_\d+)?$/.test(id);
+  if (!isValidId) {
+    res.status(400).json({ error: 'Invalid Facebook post ID format' });
+    return;
+  }
+
+  try {
+    const result = await processBids(id);
+    res.json(result);
+  } catch (error) {
+    console.error('Error processing bids:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+server.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});
+
+export { app, server, wss, sseClients, broadcastSSE };
