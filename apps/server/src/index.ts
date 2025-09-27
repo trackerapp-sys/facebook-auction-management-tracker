@@ -96,6 +96,38 @@ function calculateBids(comments: FacebookComment[]) {
   return { currentBid, leadingBidder };
 }
 
+async function processBids(postId: string) {
+  const accessToken = process.env.FACEBOOK_ACCESS_TOKEN;
+  if (!accessToken) {
+    throw new Error('Facebook access token not configured');
+  }
+
+  const apiUrl = `https://graph.facebook.com/v20.0/${postId}/comments?access_token=${accessToken}&fields=message,from{name}&limit=100`;
+
+  try {
+    const response = await fetch(apiUrl);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to fetch comments: ${response.status} ${errorText}`);
+    }
+
+    const data = await response.json();
+    const comments: FacebookComment[] = data.data || [];
+
+    const { currentBid, leadingBidder } = calculateBids(comments);
+
+    return {
+      postId,
+      currentBid,
+      leadingBidder,
+      totalComments: comments.length
+    };
+  } catch (error) {
+    console.error('Error processing bids:', error);
+    throw error;
+  }
+}
+
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
