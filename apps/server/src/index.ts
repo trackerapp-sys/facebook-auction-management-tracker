@@ -8,7 +8,7 @@ import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
 import type { Request, Response } from 'express';
-import { processBids } from './bidding';
+import { processBids } from './bidding.js';
 import type { FacebookComment } from './types';
 
 declare module 'express-session' {

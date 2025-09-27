@@ -6,7 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
-import { processBids } from './bidding';
+import { processBids } from './bidding.js';
 function extractGraphPostIdFromUrl(urlString) {
     try {
         const url = new URL(urlString);
