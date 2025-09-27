@@ -46,8 +46,8 @@ function extractGraphPostIdFromUrl(urlString: string): string | null {
     const url = new URL(urlString);
     const path = url.pathname;
 
-    // Matches group posts: /groups/{groupId}/posts/{postId}/
-    const groupPostMatch = path.match(/\/groups\/\d+\/posts\/(\d+)/);
+    // Matches group posts: /groups/{groupId}/posts/{postId}/ or /groups/{groupId}/permalink/{postId}/
+    const groupPostMatch = path.match(/\/groups\/[^/]+\/(?:posts|permalink)\/(\d+)/);
     if (groupPostMatch && groupPostMatch[1]) {
       return groupPostMatch[1];
     }
@@ -92,7 +92,6 @@ function calculateBids(comments: FacebookComment[]) {
       }
     }
   }
-
   return { currentBid, leadingBidder };
 }
 
@@ -133,9 +132,21 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 const sseClients = new Set<Response>();
 
+function broadcast(data: unknown) {
+  const message = JSON.stringify(data);
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
+  broadcastSSE(data);
+}
+
 function broadcastSSE(data: unknown) {
   const message = `data: ${JSON.stringify(data)}\n\n`;
-  sseClients.forEach((client) => client.write(message));
+  sseClients.forEach((client) => {
+    client.write(message);
+  });
 }
 
 wss.on('connection', (ws) => {
@@ -149,29 +160,10 @@ wss.on('connection', (ws) => {
 });
 
 const port = Number(process.env.PORT) || 4000;
-
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
-const INGEST_TOKEN = process.env.INGEST_TOKEN;
-const SERVER_BASE_URL = process.env.SERVER_BASE_URL || `http://localhost:${port}`;
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
-// Cache Page access tokens in-memory for webhook-related operations
-const PAGE_TOKENS = new Map<string, string>();
-const CORS_ADDITIONAL_ORIGINS = (process.env.CORS_ADDITIONAL_ORIGINS || '')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
-const DEFAULT_ALLOWED_ORIGINS = [
-  CLIENT_ORIGIN,
-  'https://facebook-auction-app.onrender.com',
-  'https://facebook-group-auction-tracker-app.onrender.com',
-  'https://www.facebook.com',
-  'https://facebook.com',
-  'https://m.facebook.com'
-];
-const ALLOWED_ORIGINS = new Set([...DEFAULT_ALLOWED_ORIGINS, ...CORS_ADDITIONAL_ORIGINS]);
-const FACEBOOK_REDIRECT_URI =
-  process.env.FACEBOOK_REDIRECT_URI || `${SERVER_BASE_URL}/auth/facebook/callback`;
+const FACEBOOK_WEBHOOK_VERIFY_TOKEN = process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN;
 const FACEBOOK_OAUTH_SCOPES = (process.env.FACEBOOK_OAUTH_SCOPES ||
   // Include Page permissions to enable webhooks for instant updates
   'public_profile,pages_show_list,pages_manage_metadata,pages_read_engagement'
@@ -179,31 +171,8 @@ const FACEBOOK_OAUTH_SCOPES = (process.env.FACEBOOK_OAUTH_SCOPES ||
   .split(',')
   .map((scope) => scope.trim())
   .filter(Boolean);
+const SERVER_BASE_URL = process.env.SERVER_BASE_URL || `http://localhost:${port}`;
 
-if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) {
-  console.warn('Facebook app credentials missing. OAuth routes will return 500 until configured.');
-}
-
-app.set('trust proxy', 1);
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin) {
-        callback(null, true);
-        return;
-      }
-
-      if (ALLOWED_ORIGINS.has(origin)) {
-        callback(null, true);
-        return;
-      }
-
-      callback(new Error('Origin ' + origin + ' not allowed by CORS'));
-    },
-    credentials: true
-  })
-);
-app.use(express.json());
 const sessionParser = session({
   name: 'auction.sid',
   secret: process.env.SESSION_SECRET || 'change-me-in-production',
@@ -216,10 +185,45 @@ const sessionParser = session({
     maxAge: 1000 * 60 * 60 * 24 * 7
   }
 });
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (CLIENT_ORIGIN === origin) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error('Origin ' + origin + ' not allowed by CORS'));
+    },
+    credentials: true
+  })
+);
+app.use(express.json());
 app.use(sessionParser);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  sseClients.add(res);
+  console.log('Client connected via SSE');
+
+  req.on('close', () => {
+    sseClients.delete(res);
+    console.log('Client disconnected from SSE');
+  });
 });
 
 app.get('/webhook/facebook', (req, res) => {
@@ -227,29 +231,82 @@ app.get('/webhook/facebook', (req, res) => {
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  if (mode === 'subscribe' && token === process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN) {
-    console.log('Webhook verified');
+  if (mode === 'subscribe' && token === FACEBOOK_WEBHOOK_VERIFY_TOKEN) {
+    console.log('Facebook webhook verified');
     res.status(200).send(challenge);
   } else {
-    console.error('Failed validation. Make sure the validation tokens match.');
+    console.error('Facebook webhook verification failed');
     res.sendStatus(403);
   }
 });
 
 app.post('/webhook/facebook', (req, res) => {
-  console.log('Facebook webhook event received:', JSON.stringify(req.body, null, 2));
-
-  // Broadcast the event to all connected clients (WebSocket)
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(req.body));
-    }
-  });
-
-  // Broadcast to SSE clients
-  broadcastSSE(req.body);
-
+  console.log('Received Facebook webhook:', JSON.stringify(req.body, null, 2));
+  broadcast(req.body);
   res.sendStatus(200);
+});
+
+app.get('/auth/facebook', (req, res) => {
+  const state = randomUUID();
+  req.session.oauthState = state;
+
+  const redirectUri = `${req.protocol}://${req.get('host')}/auth/facebook/callback`;
+  const authUrl = new URL('https://www.facebook.com/v19.0/dialog/oauth');
+  authUrl.searchParams.set('client_id', FACEBOOK_APP_ID!);
+  authUrl.searchParams.set('redirect_uri', redirectUri);
+  authUrl.searchParams.set('state', state);
+  authUrl.searchParams.set('scope', FACEBOOK_OAUTH_SCOPES.join(','));
+
+  res.redirect(authUrl.toString());
+});
+
+app.get('/auth/facebook/callback', async (req, res) => {
+  const { code, state } = req.query;
+
+  if (typeof state !== 'string' || state !== req.session.oauthState) {
+    return res.status(403).send('Invalid state parameter');
+  }
+  delete req.session.oauthState;
+
+  const tokenUrl = new URL('https://graph.facebook.com/v19.0/oauth/access_token');
+  tokenUrl.searchParams.set('client_id', FACEBOOK_APP_ID!);
+  tokenUrl.searchParams.set('client_secret', FACEBOOK_APP_SECRET!);
+  tokenUrl.searchParams.set('redirect_uri', `${req.protocol}://${req.get('host')}/auth/facebook/callback`);
+  tokenUrl.searchParams.set('code', code as string);
+
+  try {
+    const tokenResponse = await fetch(tokenUrl.toString());
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.error) {
+      throw new Error(tokenData.error.message);
+    }
+
+    const accessToken = tokenData.access_token;
+    const userId = tokenData.user_id;
+
+    const profileUrl = new URL('https://graph.facebook.com/me');
+    profileUrl.searchParams.set('access_token', accessToken);
+    profileUrl.searchParams.set('fields', 'id,name,email');
+
+    const profileResponse = await fetch(profileUrl.toString());
+    const profileData = await profileResponse.json();
+
+    if (profileData.error) {
+      throw new Error(profileData.error.message);
+    }
+
+    req.session.facebookAuth = {
+      accessToken,
+      userId,
+      profile: profileData
+    };
+
+    res.redirect(CLIENT_ORIGIN);
+  } catch (error) {
+    console.error('Error during Facebook OAuth callback:', error);
+    res.status(500).send('Authentication failed');
+  }
 });
 
 app.get('/auctions/by-url', async (req: Request, res: Response) => {
