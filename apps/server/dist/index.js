@@ -1,29 +1,112 @@
-import 'dotenv/config';
-import cors from 'cors';
-import express from 'express';
-import session from 'express-session';
+/// <reference lib="dom" />
 import { randomUUID } from 'node:crypto';
+import http from 'http';
+import session from 'express-session';
+import { WebSocketServer, WebSocket } from 'ws';
+import express from 'express';
+import cors from 'cors';
+import 'dotenv/config';
+import { processBids } from './bidding';
+function extractGraphPostIdFromUrl(urlString) {
+    try {
+        const url = new URL(urlString);
+        const path = url.pathname;
+        // Regex for various Facebook post URL formats
+        const patterns = [
+            /\/posts\/(\d+)/,
+            /\/permalink\.php\?story_fbid=([\d_]+)/,
+            /\/photo\.php\?fbid=([\d_]+)/,
+            /\/photo\/\?fbid=([\d_]+)/,
+            /\/videos\/([\d_]+)/,
+            /\/story\.php\?story_fbid=([\d_]+)/,
+            /\/groups\/\w+\/posts\/(\d+)/
+        ];
+        for (const pattern of patterns) {
+            const match = path.match(pattern) || url.search.match(pattern);
+            if (match && match[1]) {
+                return match[1];
+            }
+        }
+        // Final check on the whole string for group post URLs like `groupid_postid`
+        const groupPostMatch = urlString.match(/(\d+_\d+)/);
+        if (groupPostMatch) {
+            return groupPostMatch[0];
+        }
+    }
+    catch (error) {
+        console.error('Invalid URL provided to extractGraphPostIdFromUrl', error);
+        return null;
+    }
+    return null;
+}
 const app = express();
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+const sseClients = new Set();
+const AUCTIONS = new Map();
+function broadcastSSE(data) {
+    const payload = `data: ${JSON.stringify(data)}\n\n`;
+    sseClients.forEach((client) => {
+        client.write(payload);
+    });
+}
+async function fetchCommentsFromGraph(postId) {
+    const token = PAGE_TOKENS.get(postId) || process.env.INGEST_TOKEN;
+    if (!token)
+        throw new Error('Missing ingest token');
+    const url = `https://graph.facebook.com/v12.0/${postId}/comments?access_token=${token}&limit=500`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+        const errorData = await resp.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || 'Failed to fetch comments');
+    }
+    const data = await resp.json();
+    return data.data;
+}
+wss.on('connection', (ws, req) => {
+    // The `req` object here has been processed by middleware, so `session` is available.
+    // @ts-expect-error - session property is added by express-session middleware
+    if (!req.session?.facebookAuth) {
+        console.log('WebSocket connection rejected: No active session.');
+        ws.close(1008, 'User not authenticated');
+        return;
+    }
+    console.log('Client connected to WebSocket');
+    ws.on('message', (message) => {
+        console.log('received: %s', message);
+    });
+    ws.on('close', () => {
+        console.log('Client disconnected from WebSocket');
+    });
+    ws.on('error', (error) => {
+        console.error('WebSocket error:', error);
+    });
+});
 const port = Number(process.env.PORT) || 4000;
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
+const INGEST_TOKEN = process.env.INGEST_TOKEN;
 const SERVER_BASE_URL = process.env.SERVER_BASE_URL || `http://localhost:${port}`;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+// Cache Page access tokens in-memory for webhook-related operations
+const PAGE_TOKENS = new Map();
 const CORS_ADDITIONAL_ORIGINS = (process.env.CORS_ADDITIONAL_ORIGINS || '')
     .split(',')
-    .map((origin) => origin.trim())
+    .map((s) => s.trim())
     .filter(Boolean);
 const DEFAULT_ALLOWED_ORIGINS = [
     CLIENT_ORIGIN,
     'https://facebook-auction-app.onrender.com',
     'https://facebook-group-auction-tracker-app.onrender.com',
     'https://www.facebook.com',
-    'https://facebook.com'
+    'https://facebook.com',
+    'https://m.facebook.com'
 ];
 const ALLOWED_ORIGINS = new Set([...DEFAULT_ALLOWED_ORIGINS, ...CORS_ADDITIONAL_ORIGINS]);
 const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI || `${SERVER_BASE_URL}/auth/facebook/callback`;
 const FACEBOOK_OAUTH_SCOPES = (process.env.FACEBOOK_OAUTH_SCOPES ||
-    'public_profile')
+    // Include Page permissions to enable webhooks for instant updates
+    'public_profile,pages_show_list,pages_manage_metadata,pages_read_engagement')
     .split(',')
     .map((scope) => scope.trim())
     .filter(Boolean);
@@ -46,269 +129,196 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json());
-app.use(session({
+const sessionMiddleware = session({
     name: 'auction.sid',
     secret: process.env.SESSION_SECRET || 'change-me-in-production',
     resave: false,
     saveUninitialized: false,
     cookie: {
         secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         httpOnly: true,
-        maxAge: 1000 * 60 * 60 * 24 * 7
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        maxAge: 1000 * 60 * 60 * 24 * 7 // 1 week
     }
-}));
+});
+app.use(sessionMiddleware);
+app.get('/auth/session', (req, res) => {
+    if (req.session.facebookAuth) {
+        res.json({ authenticated: true, user: req.session.facebookAuth.profile });
+    }
+    else {
+        res.json({ authenticated: false });
+    }
+});
 app.get('/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
-app.get('/auth/facebook/url', (req, res) => {
-    if (!FACEBOOK_APP_ID) {
-        res.status(500).json({ error: 'Facebook app ID not configured' });
-        return;
+app.get('/webhook/facebook', (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+    if (mode === 'subscribe' && token === process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN) {
+        console.log('Webhook verified');
+        res.status(200).send(challenge);
     }
-    const state = randomUUID();
-    req.session.oauthState = state;
-    const authUrl = new URL('https://www.facebook.com/v19.0/dialog/oauth');
-    authUrl.searchParams.set('client_id', FACEBOOK_APP_ID);
-    authUrl.searchParams.set('redirect_uri', FACEBOOK_REDIRECT_URI);
-    authUrl.searchParams.set('response_type', 'code');
-    authUrl.searchParams.set('scope', FACEBOOK_OAUTH_SCOPES.join(','));
-    authUrl.searchParams.set('state', state);
-    res.json({ authUrl: authUrl.toString() });
-});
-app.get('/auth/facebook/callback', async (req, res) => {
-    const { state, code, error, error_description: errorDescription } = req.query;
-    if (error) {
-        console.error('Facebook OAuth error', { error, errorDescription });
-        res.redirect(`${CLIENT_ORIGIN}/auth/facebook?error=${encodeURIComponent(errorDescription ?? error)}`);
-        return;
-    }
-    if (!state || state !== req.session.oauthState) {
-        res.redirect(`${CLIENT_ORIGIN}/auth/facebook?error=invalid_state`);
-        return;
-    }
-    if (!code) {
-        res.redirect(`${CLIENT_ORIGIN}/auth/facebook?error=missing_code`);
-        return;
-    }
-    if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) {
-        res.redirect(`${CLIENT_ORIGIN}/auth/facebook?error=server_config`);
-        return;
-    }
-    try {
-        const tokenUrl = new URL('https://graph.facebook.com/v19.0/oauth/access_token');
-        tokenUrl.searchParams.set('client_id', FACEBOOK_APP_ID);
-        tokenUrl.searchParams.set('client_secret', FACEBOOK_APP_SECRET);
-        tokenUrl.searchParams.set('redirect_uri', FACEBOOK_REDIRECT_URI);
-        tokenUrl.searchParams.set('code', code);
-        const tokenResponse = await fetch(tokenUrl);
-        const tokenPayload = await tokenResponse.json();
-        if (!tokenResponse.ok) {
-            const { error: graphError } = tokenPayload;
-            throw new Error(graphError?.message || 'Failed to exchange code for access token');
-        }
-        const { access_token: accessToken, token_type: tokenType, expires_in: expiresIn } = tokenPayload;
-        if (!accessToken) {
-            throw new Error('Access token missing in response');
-        }
-        const profileUrl = new URL('https://graph.facebook.com/me');
-        profileUrl.searchParams.set('fields', 'id,name');
-        profileUrl.searchParams.set('access_token', accessToken);
-        const profileResponse = await fetch(profileUrl);
-        const profilePayload = await profileResponse.json();
-        if (!profileResponse.ok) {
-            const { error: graphError } = profilePayload;
-            throw new Error(graphError?.message || 'Failed to fetch user profile');
-        }
-        const user = profilePayload;
-        req.session.facebookAuth = {
-            accessToken,
-            tokenType,
-            expiresAt: Date.now() + expiresIn * 1000,
-            user
-        };
-        delete req.session.oauthState;
-        res.redirect(`${CLIENT_ORIGIN}/auth/facebook/complete`);
-    }
-    catch (err) {
-        console.error('Facebook OAuth callback failure', err);
-        res.redirect(`${CLIENT_ORIGIN}/auth/facebook?error=auth_failed`);
+    else {
+        console.error('Failed validation. Make sure the validation tokens match.');
+        res.sendStatus(403);
     }
 });
-app.get('/auth/facebook/session', (req, res) => {
-    const auth = req.session.facebookAuth;
-    if (!auth) {
-        res.json({ isAuthenticated: false });
-        return;
-    }
-    res.json({
-        isAuthenticated: true,
-        userName: auth.user.name,
-        userId: auth.user.id,
-        expiresAt: new Date(auth.expiresAt).toISOString()
+app.post('/webhook/facebook', (req, res) => {
+    console.log('Facebook webhook event received:', JSON.stringify(req.body, null, 2));
+    // Broadcast the event to all connected clients (WebSocket)
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(req.body));
+        }
     });
-});
-app.post('/auth/facebook/logout', (req, res) => {
-    req.session.facebookAuth = undefined;
-    res.json({ success: true });
-});
-app.get('/facebook/groups', async (req, res) => {
-    const auth = req.session.facebookAuth;
-    if (!auth) {
-        res.status(401).json({ error: 'Not authenticated with Facebook' });
-        return;
-    }
-    try {
-        const graphUrl = new URL('https://graph.facebook.com/v19.0/me/groups');
-        graphUrl.searchParams.set('fields', 'id,name,privacy,member_count');
-        graphUrl.searchParams.set('access_token', auth.accessToken);
-        const graphResponse = await fetch(graphUrl);
-        const graphPayload = await graphResponse.json();
-        if (!graphResponse.ok) {
-            const { error: graphError } = graphPayload;
-            throw new Error(graphError?.message || 'Failed to load groups');
-        }
-        const { data } = graphPayload;
-        res.json(data.map((group) => ({
-            id: group.id,
-            name: group.name,
-            privacy: (group.privacy || 'private').toLowerCase(),
-            memberCount: group.member_count ?? 0
-        })));
-    }
-    catch (err) {
-        console.error('Error fetching Facebook groups', err);
-        res.status(502).json({ error: 'Unable to fetch groups from Facebook' });
-    }
+    // Broadcast to SSE clients
+    broadcastSSE(req.body);
+    res.sendStatus(200);
 });
 app.post('/auctions', async (req, res) => {
-    const auth = req.session.facebookAuth;
-    if (!auth) {
-        res.status(401).json({ error: 'Not authenticated with Facebook' });
+    const { postUrl, endDateTime, startingPrice = 0, bidIncrement = 1 } = req.body;
+    const auctionId = randomUUID();
+    AUCTIONS.set(auctionId, { id: auctionId, postUrl, endDateTime, startingPrice, bidIncrement });
+    let currentBid = startingPrice;
+    let leadingBidder = '';
+    if (postUrl) {
+        const postId = extractGraphPostIdFromUrl(postUrl);
+        if (postId) {
+            try {
+                const comments = await fetchCommentsFromGraph(postId);
+                const result = processBids(comments);
+                currentBid = result.currentBid;
+                leadingBidder = result.leadingBidder;
+            }
+            catch (err) {
+                console.error('Error processing initial bids:', err);
+            }
+        }
+    }
+    res.json({ auctionId, startDateTime: new Date().toISOString(), endDateTime, currentBid, leadingBidder, message: 'Auction scheduled successfully' });
+});
+app.get('/auctions/by-url', async (req, res) => {
+    const { url } = req.query;
+    if (!url) {
+        res.status(400).json({ error: 'Missing url parameter' });
         return;
     }
-    const { type, itemName, description, groupId, groupUrl, reservePrice, startingPrice, startDateTime, endDateTime, durationMinutes, caratWeight, gramWeight, postUrl, autoCloseMinutes, intervalBetweenItems } = req.body;
-    const normalizedGroupId = typeof groupId === 'string' ? groupId.trim() : '';
-    const normalizedGroupUrl = typeof groupUrl === 'string' ? groupUrl.trim() : '';
-    const normalizedPostUrl = typeof postUrl === 'string' ? postUrl.trim() : '';
-    const hasGroupId = normalizedGroupId.length > 0;
-    const hasGroupUrl = normalizedGroupUrl.length > 0;
-    if (!hasGroupId && !hasGroupUrl) {
-        res.status(400).json({ error: 'Provide a Facebook group or group URL' });
+    const id = extractGraphPostIdFromUrl(url);
+    if (!id) {
+        res.status(400).json({ error: 'Invalid Facebook post URL' });
         return;
     }
-    if (!itemName || typeof itemName !== 'string') {
-        res.status(400).json({ error: 'itemName is required' });
+    const isValidId = /^\d+(_\d+)?$/.test(id);
+    if (!isValidId) {
+        res.status(400).json({ error: 'Invalid Facebook post ID format' });
         return;
     }
-    if (type !== 'post' && type !== 'live') {
-        res.status(400).json({ error: "type must be 'post' or 'live'" });
-        return;
-    }
-    if (type === 'post') {
-        if (!startDateTime || typeof startDateTime !== 'string') {
-            res.status(400).json({ error: 'startDateTime is required for post auctions' });
-            return;
-        }
-        if (!endDateTime || typeof endDateTime !== 'string') {
-            res.status(400).json({ error: 'endDateTime is required for post auctions' });
-            return;
-        }
-    }
-    const safeDescription = typeof description === 'string' ? description : '';
-    const formatCurrencyField = (input) => {
-        const numeric = typeof input === 'number'
-            ? input
-            : typeof input === 'string'
-                ? Number(input)
-                : Number.NaN;
-        if (!Number.isNaN(numeric)) {
-            return numeric.toFixed(2);
-        }
-        return '--';
-    };
-    const parseNumber = (input) => {
-        if (typeof input === 'number') {
-            return Number.isNaN(input) ? undefined : input;
-        }
-        if (typeof input === 'string' && input.trim() !== '') {
-            const parsed = Number(input);
-            return Number.isNaN(parsed) ? undefined : parsed;
-        }
-        return undefined;
-    };
     try {
-        if (type === 'post') {
-            if (!hasGroupId) {
-                res.json({
-                    auctionId: `manual-${Date.now()}`,
-                    status: 'scheduled',
-                    message: 'Facebook permissions do not allow automatic posting yet. Publish manually in Facebook and add the post URL for tracking.',
-                    startDateTime,
-                    endDateTime,
-                    durationMinutes: parseNumber(durationMinutes),
-                    caratWeight: parseNumber(caratWeight),
-                    gramWeight: parseNumber(gramWeight),
-                    groupUrl: hasGroupUrl ? normalizedGroupUrl : undefined,
-                    postUrl: normalizedPostUrl || undefined
-                });
-                return;
-            }
-            const postRequestUrl = new URL(`https://graph.facebook.com/v19.0/${normalizedGroupId}/feed`);
-            const message = `${itemName}
-Reserve: ${formatCurrencyField(reservePrice)}
-Starting: ${formatCurrencyField(startingPrice)}
-
-${safeDescription}`;
-            const body = new URLSearchParams();
-            body.set('message', message);
-            body.set('access_token', auth.accessToken);
-            const postResponse = await fetch(postRequestUrl, {
-                method: 'POST',
-                body
-            });
-            const postPayload = await postResponse.json();
-            if (!postResponse.ok) {
-                const { error: graphError } = postPayload;
-                throw new Error(graphError?.message || 'Failed to publish post');
-            }
-            const fallbackPostUrl = `https://www.facebook.com/groups/${normalizedGroupId}/posts/${postPayload.id}/`;
-            res.json({
-                auctionId: postPayload.id,
-                status: 'scheduled',
-                platformReference: postPayload.id,
-                message: 'Post published to Facebook group feed.',
-                startDateTime,
-                endDateTime,
-                durationMinutes: parseNumber(durationMinutes),
-                caratWeight: parseNumber(caratWeight),
-                gramWeight: parseNumber(gramWeight),
-                groupUrl: hasGroupUrl ? normalizedGroupUrl : undefined,
-                postUrl: normalizedPostUrl || fallbackPostUrl
-            });
-            return;
-        }
-        const liveAutoClose = parseNumber(autoCloseMinutes) ?? 60;
-        const liveInterval = parseNumber(intervalBetweenItems) ?? 4;
+        const comments = await fetchCommentsFromGraph(id);
+        const result = processBids(comments);
         res.json({
-            auctionId: `live-${Date.now()}`,
-            status: 'scheduled',
-            message: 'Live auction creation via Graph API not yet implemented.',
-            autoCloseMinutes: liveAutoClose,
-            intervalBetweenItems: liveInterval,
-            caratWeight: parseNumber(caratWeight),
-            gramWeight: parseNumber(gramWeight),
-            groupUrl: hasGroupUrl ? normalizedGroupUrl : undefined,
-            postUrl: normalizedPostUrl || undefined
+            id,
+            postUrl: url,
+            currentBid: result.currentBid,
+            leadingBidder: result.leadingBidder
         });
     }
-    catch (err) {
-        console.error('Error scheduling auction', err);
-        res.status(502).json({ error: 'Unable to schedule auction with Facebook' });
+    catch (error) {
+        console.error('Error processing bids:', error);
+        res.status(500).json({ error: 'Failed to fetch or process bids', details: error.message });
     }
 });
-app.listen(port, () => {
-    console.log(`API listening on port ${port}`);
-    console.log(`Client origin: ${CLIENT_ORIGIN}`);
-    console.log(`Facebook redirect URI: ${FACEBOOK_REDIRECT_URI}`);
+app.get('/auctions/:auctionId', async (req, res) => {
+    const { auctionId } = req.params;
+    const auction = AUCTIONS.get(auctionId);
+    if (!auction) {
+        res.status(404).json({ error: 'Auction not found' });
+        return;
+    }
+    const { postUrl, endDateTime, startingPrice } = auction;
+    let currentBid = startingPrice;
+    let leadingBidder = '';
+    if (postUrl) {
+        const postId = extractGraphPostIdFromUrl(postUrl);
+        if (postId) {
+            try {
+                const comments = await fetchCommentsFromGraph(postId);
+                const result = processBids(comments);
+                currentBid = result.currentBid;
+                leadingBidder = result.leadingBidder;
+            }
+            catch (err) {
+                console.error('Error fetching bids:', err);
+            }
+        }
+    }
+    res.json({ auctionId, startDateTime: new Date().toISOString(), endDateTime, currentBid, leadingBidder });
+});
+app.post('/auctions/ingest', async (req, res) => {
+    const { postUrl, currentBid, leadingBidder } = req.body;
+    if (!postUrl) {
+        res.status(400).json({ error: 'Missing postUrl' });
+        return;
+    }
+    const postId = extractGraphPostIdFromUrl(postUrl);
+    if (!postId) {
+        res.status(400).json({ error: 'Invalid postUrl' });
+        return;
+    }
+    try {
+        // Find or create auction
+        let auction = Array.from(AUCTIONS.values()).find(a => a.postUrl === postUrl);
+        if (!auction) {
+            const auctionId = randomUUID();
+            auction = {
+                id: auctionId,
+                postUrl,
+                startingPrice: 0,
+                bidIncrement: 1,
+                currentBid: currentBid || 0,
+                leadingBidder: leadingBidder || ''
+            };
+            AUCTIONS.set(auctionId, auction);
+        }
+        else {
+            // Update existing auction
+            auction.currentBid = currentBid || auction.currentBid || 0;
+            auction.leadingBidder = leadingBidder || auction.leadingBidder || '';
+        }
+        // Broadcast update via SSE
+        broadcastSSE({
+            type: 'auction_update',
+            auctionId: auction.id,
+            postUrl,
+            currentBid: auction.currentBid,
+            leadingBidder: auction.leadingBidder,
+            timestamp: new Date().toISOString()
+        });
+        res.json({ success: true, auctionId: auction.id });
+    }
+    catch (error) {
+        console.error('Error ingesting auction data:', error);
+        res.status(500).json({ error: 'Failed to ingest auction data', details: error.message });
+    }
+});
+// Handle WebSocket upgrades
+server.on('upgrade', (request, socket, head) => {
+    const req = request;
+    const res = {};
+    sessionMiddleware(req, res, () => {
+        if (req.session && req.session.facebookAuth) {
+            wss.handleUpgrade(request, socket, head, (ws) => {
+                wss.emit('connection', ws, request);
+            });
+        }
+        else {
+            socket.destroy();
+        }
+    });
+});
+server.listen(port, () => {
+    console.log(`Server running on port ${port}`);
 });
