@@ -1,14 +1,12 @@
 
-import 'dotenv/config';
-import cors from 'cors';
-import express from 'express';
-import session from 'express-session';
-import type { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
-import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
-import { processBids } from './bidding';
-import type { FacebookComment } from './types';
+import session from 'express-session';
+import { WebSocketServer, WebSocket } from 'ws';
+import express from 'express';
+import cors from 'cors';
+import 'dotenv/config';
+import type { Request, Response } from 'express';
 
 declare module 'express-session' {
   interface SessionData {
@@ -34,6 +32,13 @@ interface GraphError {
   type: string;
   code: number;
   fbtrace_id: string;
+}
+
+interface FacebookComment {
+  from?: {
+    name: string;
+  };
+  message: string;
 }
 
 function extractGraphPostIdFromUrl(urlString: string): string | null {
@@ -73,9 +78,27 @@ function extractGraphPostIdFromUrl(urlString: string): string | null {
   }
 }
 
+function calculateBids(comments: FacebookComment[]) {
+  let currentBid = 0;
+  let leadingBidder = '';
+
+  for (const comment of comments) {
+    const bidMatch = comment.message.match(/\d+/);
+    if (bidMatch) {
+      const bid = parseInt(bidMatch[0], 10);
+      if (bid > currentBid) {
+        currentBid = bid;
+        leadingBidder = comment.from?.name || 'Unknown Bidder';
+      }
+    }
+  }
+
+  return { currentBid, leadingBidder };
+}
+
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ noServer: true }); // Important: We'll handle upgrades manually
+const wss = new WebSocketServer({ noServer: true });
 const sseClients = new Set<Response>();
 
 function broadcastSSE(data: unknown) {
@@ -85,7 +108,12 @@ function broadcastSSE(data: unknown) {
 
 wss.on('connection', (ws) => {
   console.log('Client connected via WebSocket');
-  ws.on('close', () => console.log('Client disconnected from WebSocket'));
+  ws.on('message', (message) => {
+    console.log('received: %s', message);
+  });
+  ws.on('close', () => {
+    console.log('Client disconnected from WebSocket');
+  });
 });
 
 const port = Number(process.env.PORT) || 4000;
