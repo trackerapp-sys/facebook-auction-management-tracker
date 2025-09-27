@@ -159,8 +159,9 @@ wss.on('connection', (ws) => {
   });
 });
 
-const port = Number(process.env.PORT) || 4000;
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+const port = process.env.PORT || 3000;
+const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+const DEPLOYED_CLIENT_URL = 'https://facebook-auction-app.onrender.com';
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const FACEBOOK_WEBHOOK_VERIFY_TOKEN = process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN;
@@ -194,7 +195,7 @@ app.use(
         return;
       }
 
-      if (CLIENT_ORIGIN === origin) {
+      if (CLIENT_URL === origin || DEPLOYED_CLIENT_URL === origin) {
         callback(null, true);
         return;
       }
@@ -250,7 +251,7 @@ app.get('/auth/facebook', (req, res) => {
   const state = randomUUID();
   req.session.oauthState = state;
 
-  const redirectUri = `${req.protocol}://${req.get('host')}/auth/facebook/callback`;
+  const redirectUri = `${SERVER_BASE_URL}/auth/facebook/callback`;
   const authUrl = new URL('https://www.facebook.com/v19.0/dialog/oauth');
   authUrl.searchParams.set('client_id', FACEBOOK_APP_ID!);
   authUrl.searchParams.set('redirect_uri', redirectUri);
@@ -271,7 +272,7 @@ app.get('/auth/facebook/callback', async (req, res) => {
   const tokenUrl = new URL('https://graph.facebook.com/v19.0/oauth/access_token');
   tokenUrl.searchParams.set('client_id', FACEBOOK_APP_ID!);
   tokenUrl.searchParams.set('client_secret', FACEBOOK_APP_SECRET!);
-  tokenUrl.searchParams.set('redirect_uri', `${req.protocol}://${req.get('host')}/auth/facebook/callback`);
+  tokenUrl.searchParams.set('redirect_uri', `${SERVER_BASE_URL}/auth/facebook/callback`);
   tokenUrl.searchParams.set('code', code as string);
 
   try {
@@ -302,7 +303,7 @@ app.get('/auth/facebook/callback', async (req, res) => {
       profile: profileData
     };
 
-    res.redirect(CLIENT_ORIGIN);
+    res.redirect(CLIENT_URL);
   } catch (error) {
     console.error('Error during Facebook OAuth callback:', error);
     res.status(500).send('Authentication failed');
